@@ -19,6 +19,8 @@ void loop() {
     t = Enes100.getTheta();  //Your theta! -pi to +pi, in radians, -1 if your aruco is not visible.
     v = Enes100.isVisible(); // Is your aruco visible? True or False.
 
+hi //
+
     if (v) // If the ArUco marker is visible
     {
         Enes100.print(x); // print out the location
