@@ -1,3 +1,5 @@
+#include <Servo.h>
+
 #include "Enes100.h"
 
 void setup() {
