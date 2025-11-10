@@ -1,11 +1,13 @@
 #include <Servo.h>
-
+#include "Arduino.h"
 #include "Enes100.h"
+#include "Tank.h"
 
 void setup() {
+    Serial.begin(9600);   
     // Initialize Enes100 Library
     // Team Name, Mission Type, Marker ID, Room Number, Wifi Module TX Pin, Wifi Module RX Pin
-    Enes100.begin("C'Ryan Me A River", WATER, 12, 1116, 3, 2);
+    Enes100.begin("C'Ryan Me A River", WATER, 12, 1116, 8, 9);
     // At this point we know we are connected.
     Enes100.println("Connected...");
 }
@@ -38,6 +40,14 @@ void loop() {
     // Transmit the depth of the pool in mm (20, 30, or 40)
     Enes100.mission(DEPTH, 30);
     delay(1000);
+
+    int Sensor_WaterLV=analogRead(A0); // Incoming analog signal read and appointed sensor
+
+    int Water_Level_ml = map(Sensor_WaterLV, 0, 150, 0, 40);
+
+    Serial.println(Water_Level_ml);
+    delay(30);
+
 }
 
 //Note: working code below
