@@ -1,3 +1,5 @@
+#include <Enes100.h>
+
 #include <Servo.h>
 #include "Arduino.h"
 #include "Enes100.h"
@@ -7,7 +9,7 @@ void setup() {
     Serial.begin(9600);   
     // Initialize Enes100 Library
     // Team Name, Mission Type, Marker ID, Room Number, Wifi Module TX Pin, Wifi Module RX Pin
-    Enes100.begin("C'Ryan Me A River", WATER, 12, 1116, 8, 9);
+    Enes100.begin("CRyan Me A River", WATER, 12, 1116, 8, 9);
     // At this point we know we are connected.
     Enes100.println("Connected...");
 }
@@ -142,4 +144,3 @@ void loop() {
     Enes100.println("Navigation Done!");
     delay(10000);
 }
-
