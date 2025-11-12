@@ -10,6 +10,7 @@ void setup() {
     Enes100.begin("C'Ryan Me A River", WATER, 12, 1116, 8, 9);
     // At this point we know we are connected.
     Enes100.println("Connected...");
+     Tank.begin();
 }
 
 void loop() {
@@ -52,16 +53,10 @@ void loop() {
 
 //Note: working code below
 
-#include "Arduino.h"
-#include "Enes100.h"
-#include "Tank.h"
 
 
 
-void setup() {
-    Enes100.begin("C'ryan me a River", WATER, 12, 1116, 8, 9);
-    Tank.begin();
-}
+
 
 int sign(float number) {
     if (number >= 0) {
