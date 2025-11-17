@@ -5,6 +5,15 @@
 #include "Enes100.h"
 #include "Tank.h"
 
+int sign(float number) {
+    if (number >= 0) {
+        return 1;
+    }
+    else {
+        return -1;
+    }
+}
+
 void setup() {
     Serial.begin(9600);   
     // Initialize Enes100 Library
@@ -38,6 +47,20 @@ void loop() {
         Enes100.println("Not visible"); // print not visible
     }
 
+    float Yval = Enes100.getY();
+    if (Yval > 1) {
+        directionCtrl(-(PI / 2));
+    }
+    else {
+        directionCtrl(PI / 2);
+    }
+    Enes100.println("Setup Done!");
+    moveToX(1.0);
+    moveToY(1.0);
+    Enes100.println("Navigation Done!");
+    delay(10000);
+
+
     // Transmit the state of the pool
     Enes100.mission(WATER_TYPE, FRESH_POLLUTED);
     // Transmit the depth of the pool in mm (20, 30, or 40)
@@ -51,6 +74,67 @@ void loop() {
     Serial.println(Water_Level_ml);
     delay(30);
 
+
+
+
+    void directionCtrl(float desAngle) {
+        while (1 != 0) {
+            float turnDist = desAngle - (Enes100.getTheta());
+            int PWR = (sign(turnDist)) * (2.8 + 60 * (abs(turnDist)));
+            int aPWR = abs(PWR);
+            Tank.setLeftMotorPWM(-PWR);
+            Tank.setRightMotorPWM(PWR);
+            Enes100.print("to go: ");
+            Enes100.print(turnDist);
+            Enes100.print(" current motor power: ");
+            Enes100.println(aPWR);
+            if (aPWR == 2) {
+                Tank.setLeftMotorPWM(0);
+                Tank.setRightMotorPWM(0);
+                return;
+            }
+        }
+    
+    return;
+}
+
+void moveToX(float x) {
+    float Xdist = x - Enes100.getX();
+    if (Xdist > 0){
+        directionCtrl(0);
+    }
+    else {
+        directionCtrl(PI);
+    }
+    while (abs(Xdist) > 0.015) {
+        Xdist = x - Enes100.getX();
+        int PWR = abs(50 * Xdist) + 10;
+        Tank.setLeftMotorPWM(PWR);
+        Tank.setRightMotorPWM(PWR);
+    }
+    Tank.turnOffMotors();
+    return;
+}
+
+void moveToY(float y) {
+    float Ydist = y - Enes100.getY();
+    if (Ydist > 0) {
+        directionCtrl((PI / 2));
+    }
+    else {
+        directionCtrl(-(PI / 2));
+    }
+    while (abs(Ydist) > 0.015) {
+        Ydist = y - Enes100.getY();
+        int PWR = abs(50 * Ydist) + 10;
+        Tank.setLeftMotorPWM(PWR);
+        Tank.setRightMotorPWM(PWR);
+    }
+    Tank.turnOffMotors();
+    return;
+}
+
+
 }
 
 //Note: working code below
@@ -60,14 +144,14 @@ void loop() {
 
 
 
-int sign(float number) {
-    if (number >= 0) {
-        return 1;
-    }
-    else {
-        return -1;
-    }
-}
+//int sign(float number) {
+    //if (number >= 0) {
+    //    return 1;
+    //}
+    //else {
+    //    return -1;
+    //}
+//}
 
 void directionCtrl(float desAngle) {
     while (1 != 0) {
@@ -125,17 +209,17 @@ void moveToY(float y) {
     return;
 }
 
-void loop() {
-    float Yval = Enes100.getY();
-    if (Yval > 1) {
-        directionCtrl(-(PI / 2));
-    }
-    else {
-        directionCtrl(PI / 2);
-    }
-    Enes100.println("Setup Done!");
-    moveToX(1.0);
-    moveToY(1.0);
-    Enes100.println("Navigation Done!");
-    delay(10000);
-}
+//void loop() {
+    //float Yval = Enes100.getY();
+    //if (Yval > 1) {
+    //    directionCtrl(-(PI / 2));
+    //}
+    //else {
+    //    directionCtrl(PI / 2);
+    //}
+    //Enes100.println("Setup Done!");
+    //moveToX(1.0);
+    //moveToY(1.0);
+    //Enes100.println("Navigation Done!");
+    //delay(10000);
+//}
