@@ -20,23 +20,16 @@
 #define K_TURN          120.0f
 #define K_STRAIGHT      90.0f
 
-// ===== TOGGLES (uncomment exactly one in each pair) =====
-// Distance mode (4.0 m straight):
 // #define DISTANCE_MODE_TIME
 #define DISTANCE_MODE_VISION
 
-// Turn mode (90° x3, 1s gaps):
 #define TURN_MODE_VISION
 // #define TURN_MODE_TIME
 
-// ===== CALIBRATION for time-based fallbacks =====
-// If using time distance: meters_per_sec ≈ 0.35–0.6 typical; tune after a short trial.
 static const float METERS_PER_SEC = 0.5f;
-// If using time turn: duration (ms) to spin ~90° at TURN_PWM
 static const uint16_t TURN_TIME_90_MS = 5750;
 static const int TURN_PWM = 120;
 
-// ====== core utils ======
 static float nA(float a) {
   while (a > PI)a -= 2 * PI;
   while (a < -PI)a += 2 * PI;
@@ -111,11 +104,11 @@ static void straightHold_heading(float sec, int base = BASE_PWM) {
   brake();
 }
 
-// ====== distance: 4.0 m ======
 static void goForward4m_time() {
   float sec = 4.0f / METERS_PER_SEC;
   straightHold_heading(sec, BASE_PWM);
 }
+
 static void goForward4m_vision() {
   if (!waitVis()) {
     goForward4m_time();
@@ -125,13 +118,13 @@ static void goForward4m_vision() {
   uint32_t t0 = millis(), timeout = 20000;
   while (millis() - t0 < timeout) {
     float x = Enes100.getX(), y = Enes100.getY(), th = Enes100.getTheta();
-    float s = (x - x0) * cos(th0) + (y - y0) * sin(th0); // forward progress along heading
+    float s = (x - x0) * cos(th0) + (y - y0) * sin(th0);
     if (s >= 4.0f) break;
     float e = nA(th0 - th);
     int c = (int)constrain(K_STRAIGHT * e, -90, 90);
     setM(BASE_PWM - c, BASE_PWM + c);
     delay(10);
-    if (!Enes100.isVisible()) { // brief loss tolerance
+    if (!Enes100.isVisible()) { //vision  loss tolerance
       uint32_t lost = millis();
       while (!Enes100.isVisible() && millis() - lost < 800) {
         setM(BASE_PWM, BASE_PWM);
@@ -147,7 +140,6 @@ static void goForward4m_vision() {
   brake();
 }
 
-// ====== turning: 90° with 1s stop ======
 static void turn90_vision() {
   turnBy(PI / 2.0f);
   brake(); delay(1000);
@@ -158,7 +150,6 @@ static void turn90_time() {
   brake(); delay(1000);
 }
 
-// ====== run plan (auto, once) ======
 static bool ran = false;
 void setup() {
   pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT); pinMode(ENA, OUTPUT);
@@ -168,7 +159,6 @@ void setup() {
 void loop() {
   if (ran) return;
 
-
   #ifdef DISTANCE_MODE_VISION
     goForward4m_vision();
   #else
@@ -176,11 +166,11 @@ void loop() {
   #endif
   
   for (int i = 0; i < 3; i++) {
-#ifdef TURN_MODE_VISION
-    turn90_vision();
-#else
-    turn90_time();
-#endif
+    #ifdef TURN_MODE_VISION
+        turn90_vision();
+    #else
+        turn90_time();
+    #endif
   }
 
   ran = true;
