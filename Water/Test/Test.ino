@@ -22,12 +22,12 @@
 
 // ===== TOGGLES (uncomment exactly one in each pair) =====
 // Distance mode (4.0 m straight):
-#define DISTANCE_MODE_TIME
-// #define DISTANCE_MODE_VISION
+// #define DISTANCE_MODE_TIME
+#define DISTANCE_MODE_VISION
 
 // Turn mode (90° x3, 1s gaps):
-// #define TURN_MODE_VISION
-#define TURN_MODE_TIME
+#define TURN_MODE_VISION
+// #define TURN_MODE_TIME
 
 // ===== CALIBRATION for time-based fallbacks =====
 // If using time distance: meters_per_sec ≈ 0.35–0.6 typical; tune after a short trial.
@@ -167,6 +167,14 @@ void setup() {
 }
 void loop() {
   if (ran) return;
+
+
+  #ifdef DISTANCE_MODE_VISION
+    goForward4m_vision();
+  #else
+    goForward4m_time();
+  #endif
+  
   for (int i = 0; i < 3; i++) {
 #ifdef TURN_MODE_VISION
     turn90_vision();
