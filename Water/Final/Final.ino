@@ -5,8 +5,8 @@
 #include "Enes100.h"
 
 /********************  DEBUG TOGGLES  ********************/
-#define DEBUG         0   // master toggle for all debug logs
-#define DEBUG_SERIAL  0   // when DEBUG=1: 0 = only Enes100, 1 = Enes100 + Serial
+#define DEBUG         1   // master toggle for all debug logs
+#define DEBUG_SERIAL  1   // when DEBUG=1: 0 = only Enes100, 1 = Enes100 + Serial
 
 #if DEBUG
   #if DEBUG_SERIAL
