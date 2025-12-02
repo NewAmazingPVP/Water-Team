@@ -4,6 +4,26 @@
 #include <NewPing.h>
 #include "Enes100.h"
 
+/********************  DEBUG TOGGLES  ********************/
+#define DEBUG         0   // master toggle for all debug logs
+#define DEBUG_SERIAL  0   // when DEBUG=1: 0 = only Enes100, 1 = Enes100 + Serial
+
+#if DEBUG
+  #if DEBUG_SERIAL
+    #define DBG_BEGIN()        do { Serial.begin(9600); delay(200); } while(0)
+    #define DBG_PRINT(x)       do { Serial.print(x); Enes100.print(x); } while(0)
+    #define DBG_PRINTLN(x)     do { Serial.println(x); Enes100.println(x); } while(0)
+  #else
+    #define DBG_BEGIN()        do {} while(0)
+    #define DBG_PRINT(x)       do { Enes100.print(x); } while(0)
+    #define DBG_PRINTLN(x)     do { Enes100.println(x); } while(0)
+  #endif
+#else
+  #define DBG_BEGIN()        do {} while(0)
+  #define DBG_PRINT(x)       do {} while(0)
+  #define DBG_PRINTLN(x)     do {} while(0)
+#endif
+
 /********************  CONSTANTS  (EDITABLE)  ********************/
 // --- Frame / arena ---
 #define ARENA_X                 4.0f
@@ -28,6 +48,7 @@
 #define LIMBO_X                 3.70f
 #define LIMBO_Y                 (LIMBO_SIDE_IS_TOP ? 1.50f : 0.50f)
 #define LIMBO_APPR_DIST_M       0.40f
+#define LIMBO_PASS_DELTA_X      0.50f   // how far past limbo center to drive
 
 #define WATER_DEPTHS_MM_0       20
 #define WATER_DEPTHS_MM_1       30
@@ -38,14 +59,10 @@
 
 // --- Vision / motion ---
 #define VISION_WAIT_MS          6000
-#define VISION_DROP_GRACE_MS    800
 #define BASE_PWM                95
 #define K_TURN                  120.0f
 #define K_STRAIGHT              90.0f
 #define MAX_PWM                 180
-#define METERS_PER_SEC          0.50f
-#define TURN_TIME_90_MS         5750
-#define TURN_PWM                120
 
 // --- Obstacles / lanes ---
 #define ULTRA_OBST_WARN_M       0.40f
@@ -63,9 +80,6 @@
 #define DEPTH_STABLE_STD_MM_MAX 2
 #define COLOR_CONFIRM_COUNT     5
 
-// --- Random guess (last resort) ---
-#define ALLOW_RANDOM_GUESS      0
-
 // --- Pins ---
 #define WIFI_TX   8
 #define WIFI_RX   9
@@ -78,13 +92,14 @@
 #define IN4 13
 
 #define SERVO_PIN 3
+// WARNING: pins 0/1 are also Hardware Serial RX/TX on many Arduinos.
+// If DEBUG_SERIAL=1 and Serial is used, this can conflict with ultrasonic wiring.
 #define US_TRIG   0
 #define US_ECHO   1
 #define US_MAX_CM 200
 #define DEPTH_AIN A0
 
-//S0 and S1 are unused in the pinout, they are connected to VCC
-
+// S0 and S1 are unused in the pinout, they are connected to VCC
 #define TCS_S0  A1
 #define TCS_S1  A2
 #define TCS_S2  4
@@ -113,80 +128,153 @@ NewPing sonar(US_TRIG, US_ECHO, US_MAX_CM);
 bool ran = false;   // single demonstration run
 
 /********************  UTILS  ********************/
-static float nA(float a){ while(a>PI) a-=2*PI; while(a<-PI)a+=2*PI; return a; }
+static float nA(float a){
+  while(a > PI)   a -= 2*PI;
+  while(a < -PI)  a += 2*PI;
+  return a;
+}
 
 static void mL(int p){
   int s = constrain(abs(p),0,255);
   analogWrite(ENA, s);
   if ((p>=0) ^ INVERT_LEFT)  { digitalWrite(IN1,HIGH); digitalWrite(IN2,LOW); }
-  else                       { digitalWrite(IN1,LOW);  digitalWrite(IN2,HIGH);}
+  else                       { digitalWrite(IN1,LOW);  digitalWrite(IN2,HIGH); }
 }
+
 static void mR(int p){
   int s = constrain(abs(p),0,255);
   analogWrite(ENB, s);
   if ((p>=0) ^ INVERT_RIGHT) { digitalWrite(IN3,HIGH); digitalWrite(IN4,LOW); }
-  else                       { digitalWrite(IN3,LOW);  digitalWrite(IN4,HIGH);}
+  else                       { digitalWrite(IN3,LOW);  digitalWrite(IN4,HIGH); }
 }
-static void setM(int L,int R){ mL(L); mR(R); }
-static void brake(){ analogWrite(ENA,0); analogWrite(ENB,0); }
+
+static void setM(int L,int R){
+  mL(L); mR(R);
+}
+
+static void brake(){
+  analogWrite(ENA,0); analogWrite(ENB,0);
+  DBG_PRINTLN("Motors: BRAKE");
+}
 
 static bool waitVis(uint32_t t=VISION_WAIT_MS){
+  DBG_PRINT("waitVis: waiting up to ms=");
+  DBG_PRINTLN(t);
   uint32_t s = millis();
-  while (millis()-s < t){ if (Enes100.isVisible()) return true; delay(30); }
+  while (millis()-s < t){
+    if (Enes100.isVisible()){
+      DBG_PRINT("waitVis: visible after ms=");
+      DBG_PRINTLN(millis()-s);
+      return true;
+    }
+    delay(30);
+  }
+  DBG_PRINTLN("waitVis: TIMEOUT, not visible");
   return false;
 }
 
 /********************  VISION-ASSISTED MOTION  ********************/
 static void turnTo(float tgt, uint32_t t=3500){
+  DBG_PRINT("turnTo: tgt=");
+  DBG_PRINTLN(tgt);
   uint32_t s = millis();
   while (millis()-s < t){
-    float e = nA(tgt - Enes100.getTheta());
-    if (fabs(e) < 0.03f) break;
+    float th = Enes100.getTheta();
+    float e  = nA(tgt - th);
+    DBG_PRINT(" turnTo loop: th=");
+    DBG_PRINT(th);
+    DBG_PRINT(" e=");
+    DBG_PRINTLN(e);
+
+    if (fabs(e) < 0.03f) {
+      DBG_PRINTLN(" turnTo: within tolerance, stopping");
+      break;
+    }
     int pwm = (int)constrain(K_TURN * e, -MAX_PWM, MAX_PWM);
+    DBG_PRINT(" turnTo: pwm=");
+    DBG_PRINTLN(pwm);
     setM(-pwm, pwm);
     delay(10);
   }
   brake(); delay(100);
 }
-static void turnBy(float d){ turnTo(nA(Enes100.getTheta()+d)); }
 
-static void holdStraight_time(float sec, int base=BASE_PWM){
-  float th0 = Enes100.getTheta();
-  uint32_t end = millis() + (uint32_t)(sec*1000);
-  while ((int32_t)(end - millis()) > 0){
-    float e = nA(th0 - Enes100.getTheta());
-    int c = (int)constrain(K_STRAIGHT * e, -90, 90);
-    setM(base-c, base+c);
-    delay(10);
-  }
-  brake();
+static void turnBy(float d){
+  float tgt = nA(Enes100.getTheta()+d);
+  DBG_PRINT("turnBy: delta=");
+  DBG_PRINT(d);
+  DBG_PRINT(" tgt=");
+  DBG_PRINTLN(tgt);
+  turnTo(tgt);
 }
 
 static bool driveToward(float tx, float ty, float stopDistM){
-  if (!waitVis()) return false;
-  uint32_t t0 = millis();
-  while (true){
-    float x=Enes100.getX(), y=Enes100.getY(), th=Enes100.getTheta();
-    float dx = tx-x, dy = ty-y;
-    float dist = sqrtf(dx*dx + dy*dy);
-    if (dist <= stopDistM) { brake(); return true; }
-    float th_des = atan2f(dy, dx);
-    float e = nA(th_des - th);
-    int steer = (int)constrain(K_STRAIGHT * e, -90, 90);
-    setM(BASE_PWM - steer, BASE_PWM + steer);
+  DBG_PRINT("driveToward: target=(");
+  DBG_PRINT(tx); DBG_PRINT(",");
+  DBG_PRINT(ty); DBG_PRINT(") stopDist=");
+  DBG_PRINTLN(stopDistM);
 
-    // Graceful loss handling
+  // Purely vision-based: if we can't see, we just wait; no timed driving.
+  if (!waitVis()) {
+    DBG_PRINTLN("driveToward: FAIL, never saw marker");
+    return false;
+  }
+
+  uint32_t t0 = millis();
+  uint32_t lastLog = 0;
+
+  while (true){
     if (!Enes100.isVisible()){
-      uint32_t lost=millis();
-      while(!Enes100.isVisible() && millis()-lost < VISION_DROP_GRACE_MS){
-        setM(BASE_PWM, BASE_PWM); delay(8);
-      }
-      if (!Enes100.isVisible()){
-        brake(); return false;
+      brake();
+      DBG_PRINTLN("driveToward: lost vision, braking and waiting");
+      if (!waitVis()) {
+        DBG_PRINTLN("driveToward: FAIL, vision lost and not recovered");
+        return false; // stay stopped until vision returns, or give up
       }
     }
+
+    float x  = Enes100.getX();
+    float y  = Enes100.getY();
+    float th = Enes100.getTheta();
+
+    float dx   = tx - x;
+    float dy   = ty - y;
+    float dist = sqrtf(dx*dx + dy*dy);
+    if (dist <= stopDistM){
+      DBG_PRINT("driveToward: reached target, dist=");
+      DBG_PRINTLN(dist);
+      brake();
+      return true;
+    }
+
+    float th_des = atan2f(dy, dx);
+    float e      = nA(th_des - th);
+    int steer    = (int)constrain(K_STRAIGHT * e, -90, 90);
+    setM(BASE_PWM - steer, BASE_PWM + steer);
+
+    uint32_t now = millis();
+    if (now - lastLog > 200){
+      lastLog = now;
+      DBG_PRINT("driveToward: x=");
+      DBG_PRINT(x);
+      DBG_PRINT(" y=");
+      DBG_PRINT(y);
+      DBG_PRINT(" th=");
+      DBG_PRINT(th);
+      DBG_PRINT(" dist=");
+      DBG_PRINT(dist);
+      DBG_PRINT(" e=");
+      DBG_PRINT(e);
+      DBG_PRINT(" steer=");
+      DBG_PRINTLN(steer);
+    }
+
     delay(10);
-    if (millis()-t0 > 30000) { brake(); return false; } // timeout safeguard
+    if (millis() - t0 > 30000){ // timeout safeguard
+      DBG_PRINTLN("driveToward: TIMEOUT");
+      brake();
+      return false;
+    }
   }
 }
 
@@ -195,16 +283,22 @@ static unsigned long readColorRaw(byte s2, byte s3){
   digitalWrite(TCS_S2, s2);
   digitalWrite(TCS_S3, s3);
   delayMicroseconds(100);
-  return pulseIn(TCS_OUT, digitalRead(TCS_OUT)==HIGH? LOW:HIGH, 25000);
+  unsigned long val = pulseIn(TCS_OUT, digitalRead(TCS_OUT)==HIGH ? LOW : HIGH, 25000);
+  return val;
 }
+
 static void tcsBegin(){
   pinMode(TCS_S0,OUTPUT); pinMode(TCS_S1,OUTPUT);
-  pinMode(TCS_S2,OUTPUT); pinMode(TCS_S3,OUTPUT); pinMode(TCS_OUT,INPUT);
-  digitalWrite(TCS_S0,HIGH); digitalWrite(TCS_S1,HIGH);
+  pinMode(TCS_S2,OUTPUT); pinMode(TCS_S3,OUTPUT);
+  pinMode(TCS_OUT,INPUT);
+  digitalWrite(TCS_S0,HIGH); digitalWrite(TCS_S1,HIGH); // 100% freq scaling
+  DBG_PRINTLN("TCS: initialized");
 }
+
 static bool detectPollutants_5s(){
+  DBG_PRINTLN("Color: detectPollutants_5s START");
   int votes=0, samples=0;
-  uint32_t end=millis()+SENSE_WINDOW_MS;
+  uint32_t end = millis()+SENSE_WINDOW_MS;
   while ((int32_t)(end - millis()) > 0){
     unsigned long R = readColorRaw(LOW,LOW);
     unsigned long B = readColorRaw(LOW,HIGH);
@@ -215,10 +309,18 @@ static bool detectPollutants_5s(){
     }
     delay(SENSE_INTERVAL_MS);
   }
-  return (samples>=TCS_MIN_SAMPLES) && (votes>=COLOR_CONFIRM_COUNT);
+  DBG_PRINT("Color: samples=");
+  DBG_PRINT(samples);
+  DBG_PRINT(" votes=");
+  DBG_PRINTLN(votes);
+  bool polluted = (samples>=TCS_MIN_SAMPLES) && (votes>=COLOR_CONFIRM_COUNT);
+  DBG_PRINT("Color: polluted=");
+  DBG_PRINTLN(polluted ? "true" : "false");
+  return polluted;
 }
+
 static int stableDepthMM_5s(){
-  // collect samples then compute median and std-dev
+  DBG_PRINTLN("Depth: stableDepthMM_5s START");
   const int N = SENSE_WINDOW_MS / SENSE_INTERVAL_MS;
   int v[N], k=0;
   while (k<N){
@@ -227,21 +329,29 @@ static int stableDepthMM_5s(){
     v[k++] = mm;
     delay(SENSE_INTERVAL_MS);
   }
-  // compute mean and stddev
   float sum=0; for(int i=0;i<N;i++) sum+=v[i];
   float mean=sum/N;
   float var=0; for(int i=0;i<N;i++){ float d=v[i]-mean; var+=d*d; }
   float sd = sqrtf(var/N);
+
+  DBG_PRINT("Depth: mean=");
+  DBG_PRINT(mean);
+  DBG_PRINT(" sd=");
+  DBG_PRINTLN(sd);
+
   if (sd > DEPTH_STABLE_STD_MM_MAX){
+    DBG_PRINTLN("Depth: UNSTABLE, returning -1");
     return -1; // unstable
   }
-  // round to nearest of {20,30,40}
   int mm = (int)roundf(mean);
   int best=20, bestd=abs(mm-20);
   int cand[3]={20,30,40};
   for (int i=0;i<3;i++){
-    int d=abs(mm-cand[i]); if (d<bestd){best=cand[i]; bestd=d;}
+    int d=abs(mm-cand[i]);
+    if (d<bestd){best=cand[i]; bestd=d;}
   }
+  DBG_PRINT("Depth: chosen=");
+  DBG_PRINTLN(best);
   return best;
 }
 
@@ -250,7 +360,11 @@ static float ultraM(){
   unsigned int uS = sonar.ping();   // microseconds
   unsigned int cm = sonar.convert_cm(uS);
   if (cm==0) return 5.0f;           // out of range → big number
-  return cm / 100.0f;
+  float m = cm / 100.0f;
+  DBG_PRINT("Ultrasonic: ");
+  DBG_PRINT(m);
+  DBG_PRINTLN(" m");
+  return m;
 }
 
 /********************  HIGH-LEVEL STATES  ********************/
@@ -266,13 +380,20 @@ enum State {
 };
 
 static void sendTelemetry(bool polluted, int depthMM){
-  // Library enums vary by release; these are the usual names:
+  DBG_PRINT("Telemetry: polluted=");
+  DBG_PRINT(polluted ? "true" : "false");
+  DBG_PRINT(" depth=");
+  DBG_PRINTLN(depthMM);
+
   Enes100.mission(WATER_TYPE, (polluted ? FRESH_POLLUTED : FRESH_UNPOLLUTED));
   if (depthMM>0) Enes100.mission(DEPTH, depthMM);
 }
 
 /********************  SETUP / LOOP  ********************/
 void setup(){
+  DBG_BEGIN();
+  DBG_PRINTLN("SETUP: starting");
+
   pinMode(IN1,OUTPUT); pinMode(IN2,OUTPUT); pinMode(ENA,OUTPUT);
   pinMode(IN3,OUTPUT); pinMode(IN4,OUTPUT); pinMode(ENB,OUTPUT);
 
@@ -282,48 +403,83 @@ void setup(){
   tcsBegin();
 
   Enes100.begin(TEAM_NAME, MISSION, MARKER_ID, ROOM_NUMBER, WIFI_TX, WIFI_RX);
+  DBG_PRINTLN("SETUP: Enes100 connected");
 }
 
 static void orientTo(float tx, float ty){
-  if (waitVis()){
-    float x=Enes100.getX(), y=Enes100.getY();
-    float th_des = atan2f(ty-y, tx-x);
-    turnTo(th_des);
+  DBG_PRINT("orientTo: target=(");
+  DBG_PRINT(tx); DBG_PRINT(",");
+  DBG_PRINT(ty); DBG_PRINTLN(")");
+  if (!waitVis()) {
+    DBG_PRINTLN("orientTo: NO VISION, abort");
+    return;
   }
+  float x = Enes100.getX();
+  float y = Enes100.getY();
+  float th_des = atan2f(ty-y, tx-x);
+  DBG_PRINT("orientTo: current=(");
+  DBG_PRINT(x); DBG_PRINT(",");
+  DBG_PRINT(y); DBG_PRINT(") th_des=");
+  DBG_PRINTLN(th_des);
+  turnTo(th_des);
 }
 
-static void slideLane(float dir){ // dir: +1 right (toward y+), -1 left (toward y-)
-  // Guard edges
+static void slideLane(float dir){ // dir: +1 toward y+ (top), -1 toward y- (bottom)
+  DBG_PRINT("slideLane: dir=");
+  DBG_PRINTLN(dir);
+  if (!waitVis()) {
+    DBG_PRINTLN("slideLane: NO VISION, abort");
+    return;
+  }
   float y = Enes100.getY();
-  if ((dir>0 && y > ARENA_Y-EDGE_GUARD_Y_M) || (dir<0 && y < EDGE_GUARD_Y_M)) return;
-  // 90-deg turn, move LANE_SHIFT_M, turn back
-  turnBy(dir>0? +PI/2 : -PI/2);
-  holdStraight_time(LANE_SHIFT_M / METERS_PER_SEC, BASE_PWM);
-  turnBy(dir>0? -PI/2 : +PI/2);
+  if ((dir>0 && y > ARENA_Y-EDGE_GUARD_Y_M) || (dir<0 && y < EDGE_GUARD_Y_M)) {
+    DBG_PRINTLN("slideLane: edge guard, refusing to slide");
+    return;
+  }
+
+  float x = Enes100.getX();
+  float targetX = x;               // stay roughly same x
+  float targetY = y + dir*LANE_SHIFT_M;
+
+  DBG_PRINT("slideLane: target=(");
+  DBG_PRINT(targetX); DBG_PRINT(",");
+  DBG_PRINT(targetY); DBG_PRINTLN(")");
+  driveToward(targetX, targetY, 0.02f);
 }
 
 void loop(){
   if (ran) return;
 
+  DBG_PRINTLN("=== STATE: START ===");
+
   // Decide mission site (A or B). If you know it beforehand, set (mx,my) directly.
   float mx=A_X, my=A_Y;
-  // Heuristic: if y is closer to B_Y at start, assume mission at A; else B. (Not critical; we visually drive to the pool region anyway.)
   if (waitVis()){
     float y0=Enes100.getY();
-    if (fabsf(y0 - A_Y) < fabsf(y0 - B_Y)) { mx = B_X; my = B_Y; } else { mx = A_X; my = A_Y; }
+    DBG_PRINT("Start Y=");
+    DBG_PRINTLN(y0);
+    if (fabsf(y0 - A_Y) < fabsf(y0 - B_Y)) {
+      mx = B_X; my = B_Y;
+      DBG_PRINTLN("Heuristic: choosing mission site B");
+    } else {
+      mx = A_X; my = A_Y;
+      DBG_PRINTLN("Heuristic: choosing mission site A");
+    }
+  } else {
+    DBG_PRINTLN("Start: no vision, defaulting mission site A");
   }
 
   // --- STATE_ORIENT_TO_MISSION ---
+  DBG_PRINTLN("STATE_ORIENT_TO_MISSION");
   orientTo(mx, my);
 
   // --- STATE_DRIVE_TO_MISSION ---
-  bool ok = driveToward(mx, my, 0.30f);  // stop ~30 cm away
-  if (!ok){ // fallback: timed straight
-    holdStraight_time(0.8f, BASE_PWM);
-  }
+  DBG_PRINTLN("STATE_DRIVE_TO_MISSION");
+  driveToward(mx, my, 0.12f);  // purely vision-based approach (~12 cm from mission)
 
-  // --- STATE_FINE_STANDOFF ---
-  // approach slowly with ultrasonic to standoff 0.15 m
+  // --- STATE_FINE_STANDOFF (OPTIONAL ULTRASONIC) ---
+  /*
+  DBG_PRINTLN("STATE_FINE_STANDOFF (ultrasonic)");
   while (true){
     float d = ultraM();
     if (d <= POOL_STANDOFF_TARGET_M + POOL_STANDOFF_TOL_M) break;
@@ -332,74 +488,82 @@ void loop(){
     if (d < ULTRA_OBST_STOP_M) break;
   }
   brake();
+  */
 
   // --- STATE_MEASURE_WATER ---
+  DBG_PRINTLN("STATE_MEASURE_WATER");
   arm.write(SERVO_MEASURE_DEG); delay(SERVO_MOVE_MS);
   bool polluted=false;
   int depthMM=-1;
 
-  // color
   polluted = detectPollutants_5s();
-  // depth
   depthMM  = stableDepthMM_5s();
   arm.write(SERVO_STOW_DEG); delay(SERVO_MOVE_MS);
 
-  // last resort (off by default)
-  if (ALLOW_RANDOM_GUESS){
-    if (depthMM<0){ int choices[3]={20,30,40}; depthMM = choices[random(0,3)]; }
-    // 50-50 on pollutants
-    if (!polluted){ polluted = (random(0,2)==1); }
-  }
-
-  // send telemetry
+  // send telemetry (no random alternatives)
   if (depthMM>0) sendTelemetry(polluted, depthMM);
   else           sendTelemetry(polluted, 30); // conservative default if unstable
 
   // --- STATE_NAV_OBSTACLES ---
-  // Drive toward far side, sliding lanes if ultrasonic sees a block
-  if (!waitVis()){
-    // timed traverse if no vision at all
-    holdStraight_time( (OBST_COL_X2 - (mx)) / METERS_PER_SEC, BASE_PWM);
-  } else {
+  DBG_PRINTLN("STATE_NAV_OBSTACLES");
+  if (waitVis()){
     uint32_t t0 = millis();
     while (Enes100.getX() < (OBST_COL_X2 + 0.30f) && millis()-t0 < 20000){
+      if (!Enes100.isVisible()){
+        brake();
+        DBG_PRINTLN("Obstacles: lost vision, braking and waiting");
+        if (!waitVis()) {
+          DBG_PRINTLN("Obstacles: vision not recovered, breaking");
+          break;
+        }
+      }
       float front = ultraM();
       if (front < ULTRA_OBST_STOP_M){
-        // try to slide toward open lane: bias toward arena center
-        float y=Enes100.getY();
+        DBG_PRINTLN("Obstacles: front blocked, sliding lane");
+        float y = Enes100.getY();
         if (y < ARENA_Y/2.0f) slideLane(+1); else slideLane(-1);
       } else {
-        // straight with heading hold
-        float th0 = Enes100.getTheta();
-        float e = nA(th0 - Enes100.getTheta());
-        int c = (int)constrain(K_STRAIGHT * e, -90, 90);
+        // hold current heading (simplified)
+        int c = 0;
         setM(BASE_PWM - c, BASE_PWM + c);
         delay(15);
       }
     }
     brake();
+  } else {
+    DBG_PRINTLN("STATE_NAV_OBSTACLES: skipped, no vision");
   }
 
   // --- STATE_APPROACH_LIMBO ---
+  DBG_PRINTLN("STATE_APPROACH_LIMBO");
   orientTo(LIMBO_X, LIMBO_Y);
-  // approach and slow down near limbo
-  if (!driveToward(LIMBO_X, LIMBO_Y, LIMBO_APPR_DIST_M)){
-    holdStraight_time( 0.8f, BASE_PWM );
-  }
+  driveToward(LIMBO_X, LIMBO_Y, LIMBO_APPR_DIST_M);
   brake();
 
   // --- STATE_PASS_LIMBO ---
-  // final alignment
+  DBG_PRINTLN("STATE_PASS_LIMBO");
   if (waitVis()){
-    float x=Enes100.getX(), y=Enes100.getY();
+    float x = Enes100.getX();
+    float y = Enes100.getY();
     float th_des = atan2f(LIMBO_Y - y, LIMBO_X - x);
+    DBG_PRINT("Limbo align: x=");
+    DBG_PRINT(x);
+    DBG_PRINT(" y=");
+    DBG_PRINT(y);
+    DBG_PRINT(" th_des=");
+    DBG_PRINTLN(th_des);
     turnTo(th_des);
+  } else {
+    DBG_PRINTLN("Limbo: no vision for final align");
   }
-  // go under limbo slowly
-  setM(LIMBO_SLOW_PWM, LIMBO_SLOW_PWM);
-  delay(1800); // tune to cross under; or replace with vision distance increment
+  // Drive to a point just past the limbo, all via vision
+  float targetX = LIMBO_X + LIMBO_PASS_DELTA_X;
+  float targetY = LIMBO_Y;
+  DBG_PRINTLN("STATE_PASS_LIMBO: driving past rod");
+  driveToward(targetX, targetY, 0.10f);
   brake();
 
   // --- STATE_FINISH ---
+  DBG_PRINTLN("STATE_FINISH");
   ran = true;
 }
