@@ -1,10 +1,10 @@
 #include <Arduino.h>
 #include "Enes100.h"
 
-#define TEAM_NAME   "C'Ryan Me A River"
-#define MISSION     WATER
+#define TEAM_NAME   "Ryan Me A River"
+#define MISSION     DATA
 #define MARKER_ID   123
-#define ROOM_NUMBER 1116
+#define ROOM_NUMBER 1201
 
 #define WIFI_TX 8
 #define WIFI_RX 9
@@ -20,14 +20,14 @@
 #define K_TURN          120.0f
 #define K_STRAIGHT      90.0f
 
-// #define DISTANCE_MODE_TIME
-#define DISTANCE_MODE_VISION
+#define DISTANCE_MODE_TIME
+// #define DISTANCE_MODE_VISION
 
-#define TURN_MODE_VISION
-// #define TURN_MODE_TIME
+//#define TURN_MODE_VISION
+#define TURN_MODE_TIME
 
-static const float METERS_PER_SEC = 0.5f;
-static const uint16_t TURN_TIME_90_MS = 5750;
+static const float METERS_PER_SEC = 0.37f;
+static const uint16_t TURN_TIME_90_MS = 2800;
 static const int TURN_PWM = 120;
 
 static float nA(float a) {
@@ -106,6 +106,7 @@ static void straightHold_heading(float sec, int base = BASE_PWM) {
 
 static void goForward4m_time() {
   float sec = 4.0f / METERS_PER_SEC;
+  Enes100.print("not here");
   straightHold_heading(sec, BASE_PWM);
 }
 
@@ -118,8 +119,9 @@ static void goForward4m_vision() {
   uint32_t t0 = millis(), timeout = 20000;
   while (millis() - t0 < timeout) {
     float x = Enes100.getX(), y = Enes100.getY(), th = Enes100.getTheta();
+    Enes100.print(x);
     float s = (x - x0) * cos(th0) + (y - y0) * sin(th0);
-    if (s >= 4.0f) break;
+    if (s >= 14.0f) break;
     float e = nA(th0 - th);
     int c = (int)constrain(K_STRAIGHT * e, -90, 90);
     setM(BASE_PWM - c, BASE_PWM + c);
@@ -159,19 +161,17 @@ void setup() {
 void loop() {
   if (ran) return;
 
-  #ifdef DISTANCE_MODE_VISION
-    goForward4m_vision();
-  #else
+
     goForward4m_time();
-  #endif
-  
-  for (int i = 0; i < 3; i++) {
-    #ifdef TURN_MODE_VISION
-        turn90_vision();
-    #else
-        turn90_time();
-    #endif
-  }
+    turn90_time();
+    turn90_time();
+    turn90_time();
+    goForward4m_time();
+    goForward4m_time();
+    goForward4m_time();
+    goForward4m_time();
+    goForward4m_time();
+    goForward4m_time();
 
   ran = true;
 }
