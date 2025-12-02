@@ -78,16 +78,18 @@
 #define IN4 13
 
 #define SERVO_PIN 3
-#define US_TRIG   4
-#define US_ECHO   6
+#define US_TRIG   0
+#define US_ECHO   1
 #define US_MAX_CM 200
 #define DEPTH_AIN A0
 
+//S0 and S1 are unused in the pinout, they are connected to VCC
+
 #define TCS_S0  A1
 #define TCS_S1  A2
-#define TCS_S2  A3
-#define TCS_S3  A4
-#define TCS_OUT A5
+#define TCS_S2  4
+#define TCS_S3  5
+#define TCS_OUT 6
 
 #define SERVO_STOW_DEG          20
 #define SERVO_MEASURE_DEG       100
@@ -265,7 +267,7 @@ enum State {
 
 static void sendTelemetry(bool polluted, int depthMM){
   // Library enums vary by release; these are the usual names:
-  Enes100.mission(WATER_TYPE, (polluted ? POLLUTED : FRESH));
+  Enes100.mission(WATER_TYPE, (polluted ? FRESH_POLLUTED : FRESH_UNPOLLUTED));
   if (depthMM>0) Enes100.mission(DEPTH, depthMM);
 }
 
