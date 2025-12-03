@@ -1,0 +1,424 @@
+#include <math.h>      // must be before Enes100 / Tank
+#include "Arduino.h"
+#include "Enes100.h"
+#include "Tank.h"
+
+/********************  SIMPLE DEBUG HELPERS  ********************/
+const bool DEBUG = true;
+
+void dbg(const char* s) {
+  if (DEBUG) Enes100.print(s);
+}
+void dbgln(const char* s) {
+  if (DEBUG) Enes100.println(s);
+}
+void dbgFloat(float v) {
+  if (DEBUG) Enes100.print(v);
+}
+
+/********************  CONSTANTS (MATCH PHYSICAL NAV)  ********************/
+// Frame / arena
+const float ARENA_X  = 4.0;
+const float ARENA_Y  = 2.0;
+
+// Mission A/B
+const float A_X = 0.55;
+const float A_Y = 1.50;
+const float B_X = 0.55;
+const float B_Y = 0.50;
+
+// Obstacles (column region)
+const float OBST_COL_X1 = 1.50;
+const float OBST_COL_X2 = 2.30;
+
+// Limbo
+const int   LIMBO_SIDE_IS_TOP   = 1;
+const float LIMBO_X             = 3.70;
+const float LIMBO_Y             = (LIMBO_SIDE_IS_TOP ? 1.50 : 0.50);
+const float LIMBO_APPR_DIST_M   = 0.40;
+const float LIMBO_PASS_DELTA_X  = 0.50;
+
+// Vision / motion
+const int   BASE_PWM            = 95;
+const float K_TURN              = 120.0f;
+const float K_STRAIGHT          = 90.0f;
+const int   MAX_PWM             = 180;
+const unsigned long VISION_WAIT_MS = 6000;
+
+// Obstacle / lane shifting
+const float ULTRA_OBST_STOP_M   = 0.28f;
+const float LANE_SHIFT_M        = 0.35f;
+const float EDGE_GUARD_Y_M      = 0.12f;
+
+// Heading control thresholds
+const float PI_F                = 3.14159265f;
+const float HEADING_SPIN_THRESH = 0.6f;   // rad ~34 deg
+const float DIST_SLOW_RADIUS    = 0.4f;   // start slowing inside 40 cm
+
+// Team / mission (sim)
+const char TEAM_NAME[]  = "SimFullNav";
+const int  MISSION_TYPE = WATER;
+const int  MARKER_ID    = 3;       // set this to your sim ArUco ID
+const int  ROOM_NUMBER  = 1116;
+const int  WIFI_TX_PIN  = 8;
+const int  WIFI_RX_PIN  = 9;
+
+/********************  GLOBALS  ********************/
+bool ran = false;    // single-run in sim
+
+/********************  UTILS  ********************/
+static float nA(float a){
+  while (a >  PI_F) a -= 2.0f * PI_F;
+  while (a < -PI_F) a += 2.0f * PI_F;
+  return a;
+}
+
+/********************  MOTOR CONTROL (Tank)  ********************/
+static void setM(int L, int R){
+  if (L > 255)  L = 255;
+  if (L < -255) L = -255;
+  if (R > 255)  R = 255;
+  if (R < -255) R = -255;
+  Tank.setLeftMotorPWM(L);
+  Tank.setRightMotorPWM(R);
+}
+
+static void brake(){
+  Tank.turnOffMotors();
+}
+
+/********************  SIM ULTRASONIC  ********************/
+// Uses Tank's distance sensor in the simulator: returns meters, 0..1 to white blocks.
+static float ultraM(){
+  float d = Tank.readDistanceSensor(1); // sensor 1 enabled in sim
+  if (d <= 0.0f) d = 5.0f;              // treat 0 / invalid as very far
+  dbg("ultraM = ");
+  dbgFloat(d);
+  dbgln("");
+  return d;
+}
+
+/********************  VISION HELPERS  ********************/
+static bool waitVis(unsigned long t = VISION_WAIT_MS){
+  dbg("waitVis: up to ms=");
+  dbgFloat((float)t);
+  dbgln("");
+  unsigned long start = millis();
+  while (millis() - start < t){
+    if (Enes100.isVisible()){
+      dbg("waitVis: visible after ms=");
+      dbgFloat((float)(millis() - start));
+      dbgln("");
+      return true;
+    }
+    delay(30);
+  }
+  dbgln("waitVis: TIMEOUT no vision");
+  return false;
+}
+
+/********************  TURNING  ********************/
+static void turnTo(float tgt, unsigned long t = 3500){
+  dbg("turnTo: tgt=");
+  dbgFloat(tgt);
+  dbgln("");
+  unsigned long start = millis();
+  while (millis() - start < t){
+    float th = Enes100.getTheta();
+    float e  = nA(tgt - th);
+
+    dbg(" turnTo: th=");
+    dbgFloat(th);
+    dbg(" e=");
+    dbgFloat(e);
+    dbgln("");
+
+    if (fabs(e) < 0.03f){  // ~2 deg
+      dbgln(" turnTo: within tolerance");
+      break;
+    }
+
+    float pwmF = K_TURN * e;
+    int   pwm  = (int)pwmF;
+    if (pwm >  MAX_PWM) pwm =  MAX_PWM;
+    if (pwm < -MAX_PWM) pwm = -MAX_PWM;
+
+    setM(-pwm, pwm);       // spin in place
+    delay(10);
+  }
+  brake();
+  delay(100);
+}
+
+static void turnBy(float d){
+  float tgt = nA(Enes100.getTheta() + d);
+  dbg("turnBy: d=");
+  dbgFloat(d);
+  dbg(" tgt=");
+  dbgFloat(tgt);
+  dbgln("");
+  turnTo(tgt);
+}
+
+/********************  DRIVE TOWARD POINT (VISION-BASED)  ********************/
+// This is the “don’t orbit around target” version.
+static bool driveToward(float tx, float ty, float stopDistM){
+  dbg("driveToward: target=(");
+  dbgFloat(tx);
+  dbg(" ");
+  dbgFloat(ty);
+  dbg(") stopDist=");
+  dbgFloat(stopDistM);
+  dbgln("");
+
+  if (!waitVis()){
+    dbgln("driveToward: FAIL (no initial vision)");
+    return false;
+  }
+
+  unsigned long start   = millis();
+  unsigned long lastLog = 0;
+
+  while (true){
+    if (!Enes100.isVisible()){
+      brake();
+      dbgln("driveToward: lost vision waiting...");
+      if (!waitVis()){
+        dbgln("driveToward: FAIL (vision never returned)");
+        return false;
+      }
+    }
+
+    float x  = Enes100.getX();
+    float y  = Enes100.getY();
+    float th = Enes100.getTheta();
+
+    float dx   = tx - x;
+    float dy   = ty - y;
+    float dist = (float)sqrt(dx*dx + dy*dy);
+
+    if (dist <= stopDistM){
+      dbg("driveToward: reached dist=");
+      dbgFloat(dist);
+      dbgln("");
+      brake();
+      return true;
+    }
+
+    float th_des = (float)atan2(dy, dx);
+    float e      = nA(th_des - th);
+    float ae     = (float)fabs(e);
+
+    // --- Avoid circles: spin in place on large heading error ---
+    if (ae > HEADING_SPIN_THRESH){
+      float pwmF = K_TURN * e;
+      int   pwm  = (int)pwmF;
+      if (pwm >  MAX_PWM) pwm =  MAX_PWM;
+      if (pwm < -MAX_PWM) pwm = -MAX_PWM;
+      setM(-pwm, pwm);    // spin only
+    } else {
+      // Heading OK: drive forward with steering.
+      float scale = 1.0f;
+      if (dist < DIST_SLOW_RADIUS){
+        scale = dist / DIST_SLOW_RADIUS;  // 0..1
+        if (scale < 0.4f) scale = 0.4f;   // avoid stalling
+      }
+      int base = (int)(BASE_PWM * scale);
+
+      float steerF = K_STRAIGHT * e;
+      if (steerF >  60.0f) steerF =  60.0f;
+      if (steerF < -60.0f) steerF = -60.0f;
+      int steer = (int)steerF;
+
+      setM(base - steer, base + steer);
+    }
+
+    unsigned long now = millis();
+    if (now - lastLog > 200){
+      lastLog = now;
+      dbg("driveToward: x=");
+      dbgFloat(x);
+      dbg(" y=");
+      dbgFloat(y);
+      dbg(" th=");
+      dbgFloat(th);
+      dbg(" dist=");
+      dbgFloat(dist);
+      dbg(" e=");
+      dbgFloat(e);
+      dbgln("");
+    }
+
+    if (millis() - start > 30000){
+      dbgln("driveToward: TIMEOUT");
+      brake();
+      return false;
+    }
+
+    delay(10);
+  }
+}
+
+/********************  ORIENT TO POINT  ********************/
+static void orientTo(float tx, float ty){
+  if (!waitVis()){
+    dbgln("orientTo: NO VISION");
+    return;
+  }
+  float x  = Enes100.getX();
+  float y  = Enes100.getY();
+  float th_des = (float)atan2(ty - y, tx - x);
+
+  dbg("orientTo: from (");
+  dbgFloat(x);
+  dbg(" ");
+  dbgFloat(y);
+  dbg(") to(");
+  dbgFloat(tx);
+  dbg(" ");
+  dbgFloat(ty);
+  dbg(") th_des=");
+  dbgFloat(th_des);
+  dbgln("");
+
+  turnTo(th_des);
+}
+
+/********************  LANE SLIDE (VISION + ULTRASONIC)  ********************/
+static void slideLane(float dir){ // dir: +1 toward y+ (top), -1 toward y- (bottom)
+  dbg("slideLane: dir=");
+  dbgFloat(dir);
+  dbgln("");
+
+  if (!waitVis()){
+    dbgln("slideLane: NO VISION");
+    return;
+  }
+
+  float y = Enes100.getY();
+  if ((dir > 0.0f && y > ARENA_Y - EDGE_GUARD_Y_M) ||
+      (dir < 0.0f && y < EDGE_GUARD_Y_M)){
+    dbgln("slideLane: edge guard skipping slide");
+    return;
+  }
+
+  float x = Enes100.getX();
+  float targetX = x;
+  float targetY = y + dir * LANE_SHIFT_M;
+
+  dbg("slideLane: target=(");
+  dbgFloat(targetX);
+  dbg(" ");
+  dbgFloat(targetY);
+  dbgln(")");
+
+  driveToward(targetX, targetY, 0.02f);
+}
+
+/********************  SETUP / LOOP  ********************/
+void setup(){
+  Enes100.begin(TEAM_NAME, MISSION_TYPE, MARKER_ID, ROOM_NUMBER,
+                WIFI_TX_PIN, WIFI_RX_PIN);
+  Tank.begin();
+
+  dbgln("=== Sim Full Nav Test: START ===");
+}
+
+void loop(){
+  if (ran) return;
+
+  // Decide mission site A/B using same heuristic as your real code
+  float mx = A_X;
+  float my = A_Y;
+
+  if (waitVis()){
+    float y0 = Enes100.getY();
+    dbg("Start Y=");
+    dbgFloat(y0);
+    dbgln("");
+
+    if (fabs(y0 - A_Y) < fabs(y0 - B_Y)){
+      mx = B_X; my = B_Y;
+      dbgln("Heuristic: choosing mission site B");
+    } else {
+      mx = A_X; my = A_Y;
+      dbgln("Heuristic: choosing mission site A");
+    }
+  } else {
+    dbgln("No start vision: default mission A");
+  }
+
+  // --- STATE_ORIENT_TO_MISSION ---
+  dbgln("STATE_ORIENT_TO_MISSION");
+  orientTo(mx, my);
+
+  // --- STATE_DRIVE_TO_MISSION (pure vision) ---
+  dbgln("STATE_DRIVE_TO_MISSION");
+  driveToward(mx, my, 0.12f);   // about 12 cm radius
+
+  // --- STATE_MEASURE_WATER (SIM: SKIPPED) ---
+  dbgln("STATE_MEASURE_WATER (sim only: skipped)");
+
+  // --- STATE_NAV_OBSTACLES ---
+//   dbgln("STATE_NAV_OBSTACLES");
+//   if (waitVis()){
+//     unsigned long t0 = millis();
+//     while (Enes100.getX() < (OBST_COL_X2 + 0.30f) && millis() - t0 < 20000){
+//       if (!Enes100.isVisible()){
+//         brake();
+//         dbgln("Obstacles: lost vision waiting...");
+//         if (!waitVis()){
+//           dbgln("Obstacles: vision not recovered breaking");
+//           break;
+//         }
+//       }
+//       float front = ultraM();
+//       if (front < ULTRA_OBST_STOP_M){
+//         dbgln("Obstacles: front blocked sliding lane");
+//         float y = Enes100.getY();
+//         if (y < ARENA_Y / 2.0f) slideLane(+1.0f);
+//         else                    slideLane(-1.0f);
+//       } else {
+//         // simple straight push in obstacle zone
+//         setM(BASE_PWM, BASE_PWM);
+//         delay(20);
+//       }
+//     }
+//     brake();
+//   } else {
+//     dbgln("STATE_NAV_OBSTACLES: skipped (no vision)");
+//   }
+
+  // --- STATE_APPROACH_LIMBO ---
+  dbgln("STATE_APPROACH_LIMBO");
+  orientTo(LIMBO_X, LIMBO_Y);
+  driveToward(LIMBO_X, LIMBO_Y, LIMBO_APPR_DIST_M);
+  brake();
+
+  // --- STATE_PASS_LIMBO ---
+  dbgln("STATE_PASS_LIMBO");
+  if (waitVis()){
+    float x  = Enes100.getX();
+    float y  = Enes100.getY();
+    float th_des = (float)atan2(LIMBO_Y - y, LIMBO_X - x);
+    dbg("Limbo align: x=");
+    dbgFloat(x);
+    dbg(" y=");
+    dbgFloat(y);
+    dbg(" th_des=");
+    dbgFloat(th_des);
+    dbgln("");
+    turnTo(th_des);
+  } else {
+    dbgln("Limbo: no vision for final align");
+  }
+
+  float targetX = LIMBO_X + LIMBO_PASS_DELTA_X;
+  float targetY = LIMBO_Y;
+  dbgln("STATE_PASS_LIMBO: drive past limbo");
+  driveToward(targetX, targetY, 0.10f);
+  brake();
+
+  dbgln("STATE_FINISH");
+  ran = true;
+}
