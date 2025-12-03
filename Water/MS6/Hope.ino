@@ -1,7 +1,6 @@
-#include <math.h>      // must be before Enes100 / Tank
-#include "Arduino.h"
+#include <math.h>      // must be before Enes100
+#include <Arduino.h>
 #include "Enes100.h"
-#include "Tank.h"
 
 /********************  SIMPLE DEBUG HELPERS  ********************/
 const bool DEBUG = true;
@@ -15,6 +14,23 @@ void dbgln(const char* s) {
 void dbgFloat(float v) {
   if (DEBUG) Enes100.print(v);
 }
+
+/********************  TEAM / WIFI (SET THESE FOR YOUR ROBOT)  ********************/
+#define TEAM_NAME   "Ryan Me A River"   // <-- change if needed
+#define MISSION     WATER               // or DATA, etc.
+#define MARKER_ID   3                   // <-- set to your real ArUco ID
+#define ROOM_NUMBER 1116                // <-- your room number
+
+#define WIFI_TX_PIN 8
+#define WIFI_RX_PIN 9
+
+/********************  MOTOR PINS (FROM WORKING REAL CODE)  ********************/
+#define ENA 10
+#define IN1 2
+#define IN2 7
+#define ENB 11
+#define IN3 12
+#define IN4 13
 
 /********************  CONSTANTS (MATCH PHYSICAL NAV)  ********************/
 // Frame / arena
@@ -55,16 +71,8 @@ const float PI_F                = 3.14159265f;
 const float HEADING_SPIN_THRESH = 0.6f;   // rad ~34 deg
 const float DIST_SLOW_RADIUS    = 0.4f;   // start slowing inside 40 cm
 
-// Team / mission (sim)
-const char TEAM_NAME[]  = "SimFullNav";
-const int  MISSION_TYPE = WATER;
-const int  MARKER_ID    = 3;       // set this to your sim ArUco ID
-const int  ROOM_NUMBER  = 1116;
-const int  WIFI_TX_PIN  = 8;
-const int  WIFI_RX_PIN  = 9;
-
 /********************  GLOBALS  ********************/
-bool ran = false;    // single-run in sim
+bool ran = false;    // single-run in real robot too
 
 /********************  UTILS  ********************/
 static float nA(float a){
@@ -73,26 +81,58 @@ static float nA(float a){
   return a;
 }
 
-/********************  MOTOR CONTROL (Tank)  ********************/
+/********************  LOW-LEVEL MOTOR CONTROL (REAL ROBOT)  ********************/
+// From your working code, just wrapped so the rest of the nav code stays identical.
+
+static void mL(int p) {
+  int s = abs(p);
+  analogWrite(ENA, s);
+  if (p >= 0) {
+    digitalWrite(IN1, HIGH);
+    digitalWrite(IN2, LOW);
+  } else {
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, HIGH);
+  }
+}
+
+static void mR(int p) {
+  int s = abs(p);
+  analogWrite(ENB, s);
+  if (p >= 0) {
+    digitalWrite(IN3, HIGH);
+    digitalWrite(IN4, LOW);
+  } else {
+    digitalWrite(IN3, LOW);
+    digitalWrite(IN4, HIGH);
+  }
+}
+
+// This replaces the old Tank.setLeftMotorPWM / setRightMotorPWM
 static void setM(int L, int R){
   if (L > 255)  L = 255;
   if (L < -255) L = -255;
   if (R > 255)  R = 255;
   if (R < -255) R = -255;
-  Tank.setLeftMotorPWM(L);
-  Tank.setRightMotorPWM(R);
+  mL(L);
+  mR(R);
 }
 
+// This replaces Tank.turnOffMotors()
 static void brake(){
-  Tank.turnOffMotors();
+  analogWrite(ENA, 0);
+  analogWrite(ENB, 0);
 }
 
-/********************  SIM ULTRASONIC  ********************/
-// Uses Tank's distance sensor in the simulator: returns meters, 0..1 to white blocks.
+/********************  (OPTIONAL) ULTRASONIC STUB  ********************/
+// In your sim code this used Tank.readDistanceSensor(1), and the only usage
+// is inside the commented-out obstacle state. To keep the code compiling on
+// real hardware, we just stub it to "very far".
+//
+// If you later wire a real ultrasonic, you can implement it here.
 static float ultraM(){
-  float d = Tank.readDistanceSensor(1); // sensor 1 enabled in sim
-  if (d <= 0.0f) d = 5.0f;              // treat 0 / invalid as very far
-  dbg("ultraM = ");
+  float d = 5.0f;   // 5m = "no obstacle"
+  dbg("ultraM (stub) = ");
   dbgFloat(d);
   dbgln("");
   return d;
@@ -162,6 +202,7 @@ static void turnBy(float d){
 
 /********************  DRIVE TOWARD POINT (VISION-BASED)  ********************/
 // This is the “don’t orbit around target” version.
+// NAV LOGIC IDENTICAL TO SIM VERSION.
 static bool driveToward(float tx, float ty, float stopDistM){
   dbg("driveToward: target=(");
   dbgFloat(tx);
@@ -317,11 +358,18 @@ static void slideLane(float dir){ // dir: +1 toward y+ (top), -1 toward y- (bott
 
 /********************  SETUP / LOOP  ********************/
 void setup(){
-  Enes100.begin(TEAM_NAME, MISSION_TYPE, MARKER_ID, ROOM_NUMBER,
-                WIFI_TX_PIN, WIFI_RX_PIN);
-  Tank.begin();
+  // Motor pin modes (from your real code)
+  pinMode(IN1, OUTPUT); 
+  pinMode(IN2, OUTPUT); 
+  pinMode(ENA, OUTPUT);
+  pinMode(IN3, OUTPUT); 
+  pinMode(IN4, OUTPUT); 
+  pinMode(ENB, OUTPUT);
 
-  dbgln("=== Sim Full Nav Test: START ===");
+  Enes100.begin(TEAM_NAME, MISSION, MARKER_ID, ROOM_NUMBER,
+                WIFI_TX_PIN, WIFI_RX_PIN);
+
+  dbgln("=== Real Robot Full Nav Test: START ===");
 }
 
 void loop(){
@@ -357,37 +405,39 @@ void loop(){
   driveToward(mx, my, 0.12f);   // about 12 cm radius
 
   // --- STATE_MEASURE_WATER (SIM: SKIPPED) ---
-  dbgln("STATE_MEASURE_WATER (sim only: skipped)");
+  dbgln("STATE_MEASURE_WATER (sim/real: skipped placeholder)");
 
-  // --- STATE_NAV_OBSTACLES ---
-//   dbgln("STATE_NAV_OBSTACLES");
-//   if (waitVis()){
-//     unsigned long t0 = millis();
-//     while (Enes100.getX() < (OBST_COL_X2 + 0.30f) && millis() - t0 < 20000){
-//       if (!Enes100.isVisible()){
-//         brake();
-//         dbgln("Obstacles: lost vision waiting...");
-//         if (!waitVis()){
-//           dbgln("Obstacles: vision not recovered breaking");
-//           break;
-//         }
-//       }
-//       float front = ultraM();
-//       if (front < ULTRA_OBST_STOP_M){
-//         dbgln("Obstacles: front blocked sliding lane");
-//         float y = Enes100.getY();
-//         if (y < ARENA_Y / 2.0f) slideLane(+1.0f);
-//         else                    slideLane(-1.0f);
-//       } else {
-//         // simple straight push in obstacle zone
-//         setM(BASE_PWM, BASE_PWM);
-//         delay(20);
-//       }
-//     }
-//     brake();
-//   } else {
-//     dbgln("STATE_NAV_OBSTACLES: skipped (no vision)");
-//   }
+  // --- STATE_NAV_OBSTACLES --- (still commented, same as sim)
+  /*
+  dbgln("STATE_NAV_OBSTACLES");
+  if (waitVis()){
+    unsigned long t0 = millis();
+    while (Enes100.getX() < (OBST_COL_X2 + 0.30f) && millis() - t0 < 20000){
+      if (!Enes100.isVisible()){
+        brake();
+        dbgln("Obstacles: lost vision waiting...");
+        if (!waitVis()){
+          dbgln("Obstacles: vision not recovered breaking");
+          break;
+        }
+      }
+      float front = ultraM();
+      if (front < ULTRA_OBST_STOP_M){
+        dbgln("Obstacles: front blocked sliding lane");
+        float y = Enes100.getY();
+        if (y < ARENA_Y / 2.0f) slideLane(+1.0f);
+        else                    slideLane(-1.0f);
+      } else {
+        // simple straight push in obstacle zone
+        setM(BASE_PWM, BASE_PWM);
+        delay(20);
+      }
+    }
+    brake();
+  } else {
+    dbgln("STATE_NAV_OBSTACLES: skipped (no vision)");
+  }
+  */
 
   // --- STATE_APPROACH_LIMBO ---
   dbgln("STATE_APPROACH_LIMBO");
