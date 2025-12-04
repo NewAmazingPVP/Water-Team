@@ -20,7 +20,7 @@ void dbgFloat(float v) {
 /********************  TEAM / WIFI (SET THESE FOR YOUR ROBOT)  ********************/
 #define TEAM_NAME   "Ryan Me A River"   // <-- change if needed
 #define MISSION     WATER               // or DATA, etc.
-#define MARKER_ID   3                   // <-- set to your real ArUco ID
+#define MARKER_ID   123                   // <-- set to your real ArUco ID
 #define ROOM_NUMBER 1116                // <-- your room number
 
 #define WIFI_TX_PIN 8
@@ -33,6 +33,32 @@ void dbgFloat(float v) {
 #define ENB 11
 #define IN3 12
 #define IN4 13
+
+// --- Water measurement hardware ---
+#define SERVO_PIN   3
+
+#define DEPTH_AIN   A0   // analog depth sensor
+
+// TCS34725-style color sensor pins
+#define TCS_S0      A1
+#define TCS_S1      A2
+#define TCS_S2      4
+#define TCS_S3      5
+#define TCS_OUT     6
+
+// Servo positions for arm
+#define SERVO_STOW_DEG     20
+#define SERVO_MEASURE_DEG  100
+#define SERVO_MOVE_MS      450  // wait time after move
+
+// Color sensing / thresholds
+#define SENSE_WINDOW_MS         5000
+#define SENSE_INTERVAL_MS       40
+#define DEPTH_STABLE_STD_MM_MAX 2
+#define COLOR_CONFIRM_COUNT     5
+#define TCS_RED_MAX             78
+#define TCS_MIN_SAMPLES         25
+
 
 /********************  CONSTANTS (MATCH PHYSICAL NAV)  ********************/
 // Frame / arena
@@ -75,6 +101,7 @@ const float DIST_SLOW_RADIUS    = 0.4f;   // start slowing inside 40 cm
 
 /********************  GLOBALS  ********************/
 bool ran = false;    // single-run in real robot too
+Servo arm;
 
 /********************  UTILS  ********************/
 static float nA(float a){
@@ -125,6 +152,117 @@ static void brake(){
   analogWrite(ENA, 0);
   analogWrite(ENB, 0);
 }
+
+/********************  COLOR & DEPTH HELPERS  ********************/
+
+static unsigned long readColorRaw(uint8_t s2, uint8_t s3){
+  digitalWrite(TCS_S2, s2);
+  digitalWrite(TCS_S3, s3);
+  delayMicroseconds(100);
+  // Measure pulse width; invert edge based on current pin state
+  unsigned long val = pulseIn(
+      TCS_OUT,
+      (digitalRead(TCS_OUT) == HIGH) ? LOW : HIGH,
+      25000
+  );
+  return val;
+}
+
+static void tcsBegin(){
+  pinMode(TCS_S0, OUTPUT);
+  pinMode(TCS_S1, OUTPUT);
+  pinMode(TCS_S2, OUTPUT);
+  pinMode(TCS_S3, OUTPUT);
+  pinMode(TCS_OUT, INPUT);
+
+  // 100% frequency scaling
+  digitalWrite(TCS_S0, HIGH);
+  digitalWrite(TCS_S1, HIGH);
+}
+
+static bool detectPollutants_5s(){
+  int votes   = 0;
+  int samples = 0;
+
+  unsigned long end = millis() + SENSE_WINDOW_MS;
+  while ((long)(end - millis()) > 0){
+    unsigned long R = readColorRaw(LOW,  LOW);
+    unsigned long B = readColorRaw(LOW,  HIGH);
+    unsigned long G = readColorRaw(HIGH, HIGH);
+
+    if (R > 0 && B > 0 && G > 0){
+      // "Red-ish and dark" = polluted
+      if (R < B && R <= G && R < TCS_RED_MAX){
+        votes++;
+      }
+      samples++;
+    }
+    delay(SENSE_INTERVAL_MS);
+  }
+
+  bool polluted = (samples >= TCS_MIN_SAMPLES) &&
+                  (votes   >= COLOR_CONFIRM_COUNT);
+
+  dbgln("Color: detectPollutants_5s done");
+  return polluted;
+}
+
+static int stableDepthMM_5s(){
+  const int N = SENSE_WINDOW_MS / SENSE_INTERVAL_MS;
+  int v[N];
+  int k = 0;
+
+  while (k < N){
+    int raw = analogRead(DEPTH_AIN);
+    // Rough mapping from ADC to mm depth; tune constants on real robot
+    int mm  = map(raw, 0, 150, 0, 40);
+    v[k++] = mm;
+    delay(SENSE_INTERVAL_MS);
+  }
+
+  float sum = 0.0f;
+  for (int i = 0; i < N; i++) sum += v[i];
+  float mean = sum / N;
+
+  float var = 0.0f;
+  for (int i = 0; i < N; i++){
+    float d = v[i] - mean;
+    var += d * d;
+  }
+  float sd = sqrtf(var / N);
+
+  if (sd > DEPTH_STABLE_STD_MM_MAX){
+    dbgln("Depth: unstable");
+    return -1;   // too noisy / moving
+  }
+
+  // Snap mean to nearest of {20,30,40} mm
+  int mm = (int)roundf(mean);
+  int cand[3] = {20, 30, 40};
+  int best    = cand[0];
+  int bestd   = abs(mm - cand[0]);
+  for (int i = 1; i < 3; i++){
+    int d = abs(mm - cand[i]);
+    if (d < bestd){
+      best  = cand[i];
+      bestd = d;
+    }
+  }
+  return best;
+}
+
+/********************  TELEMETRY  ********************/
+
+static void sendTelemetry(bool polluted, int depthMM){
+  // WATER_TYPE / FRESH_POLLUTED / FRESH_UNPOLLUTED / DEPTH
+  // come from the Enes100 library.
+  Enes100.mission(WATER_TYPE,
+                  polluted ? FRESH_POLLUTED : FRESH_UNPOLLUTED);
+  if (depthMM > 0){
+    Enes100.mission(DEPTH, depthMM);
+  }
+}
+
 
 /********************  (OPTIONAL) ULTRASONIC STUB  ********************/
 // In your sim code this used Tank.readDistanceSensor(1), and the only usage
@@ -360,19 +498,28 @@ static void slideLane(float dir){ // dir: +1 toward y+ (top), -1 toward y- (bott
 
 /********************  SETUP / LOOP  ********************/
 void setup(){
-  // Motor pin modes (from your real code)
-  pinMode(IN1, OUTPUT); 
-  pinMode(IN2, OUTPUT); 
+  // Motor pin modes
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
   pinMode(ENA, OUTPUT);
-  pinMode(IN3, OUTPUT); 
-  pinMode(IN4, OUTPUT); 
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
   pinMode(ENB, OUTPUT);
 
-  Enes100.begin(TEAM_NAME, MISSION, MARKER_ID, ROOM_NUMBER,
+  // Arm servo
+  arm.attach(SERVO_PIN);
+  arm.write(SERVO_STOW_DEG);   // start stowed
+
+  // Color sensor init
+  tcsBegin();
+
+  // Enes100 / WiFi
+  Enes100.begin(TEAM_NAME, WATER, MARKER_ID, ROOM_NUMBER,
                 WIFI_TX_PIN, WIFI_RX_PIN);
 
-  dbgln("=== Real Robot Full Nav Test: START ===");
+  dbgln("=== Real Robot Full Nav + Water Measure: START ===");
 }
+
 
 void loop(){
   if (ran) return;
