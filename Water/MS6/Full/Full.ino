@@ -70,7 +70,7 @@ const float OBST_COL_X2 = 2.30f;
 // Limbo
 const int   LIMBO_SIDE_IS_TOP   = 1;
 const float LIMBO_X             = 3.70f;
-const float LIMBO_Y             = (LIMBO_SIDE_IS_TOP ? 1.50f : 0.50f);
+const float LIMBO_Y             = (LIMBO_SIDE_IS_TOP ? 1.70f : 0.50f);
 const float LIMBO_APPR_DIST_M   = 0.40f;
 const float LIMBO_PASS_DELTA_X  = 0.10f;
 
