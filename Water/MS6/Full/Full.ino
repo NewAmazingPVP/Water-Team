@@ -98,7 +98,7 @@ const float         DEPTH_STABLE_STD_MM_MAX = 2.0f;
 const int           COLOR_CONFIRM_COUNT     = 5;
 
 // Servo positions
-const int SERVO_STOW_DEG    = 20;
+const int SERVO_STOW_DEG    = 20; //initial angle
 const int SERVO_MEASURE_DEG = 100;
 const int SERVO_MOVE_MS     = 450;
 
@@ -708,28 +708,36 @@ void loop(){
   driveToward(LIMBO_X, LIMBO_Y, LIMBO_APPR_DIST_M);
   brake();
 
-  // --- STATE_PASS_LIMBO ---
-  dbgln("STATE_PASS_LIMBO");
-  if (waitVis()){
-    float x  = Enes100.getX();
-    float y  = Enes100.getY();
-    float th_des = (float)atan2(LIMBO_Y - y, LIMBO_X - x);
-    dbg("Limbo align: x=");
-    dbgFloat(x);
-    dbg(" y=");
-    dbgFloat(y);
-    dbg(" th_des=");
-    dbgFloat(th_des);
-    dbgln("");
-    turnTo(th_des);
-  } else {
-    dbgln("Limbo: no vision for final align");
-  }
+  // // --- STATE_PASS_LIMBO ---
+  // dbgln("STATE_PASS_LIMBO");
+  // if (waitVis()){
+  //   float x  = Enes100.getX();
+  //   float y  = Enes100.getY();
+  //   float th_des = (float)atan2(LIMBO_Y - y, LIMBO_X - x);
+  //   dbg("Limbo align: x=");
+  //   dbgFloat(x);
+  //   dbg(" y=");
+  //   dbgFloat(y);
+  //   dbg(" th_des=");
+  //   dbgFloat(th_des);
+  //   dbgln("");
+  //   turnTo(th_des);
+  // } else {
+  //   dbgln("Limbo: no vision for final align");
+  // }
 
-  float targetX = LIMBO_X + LIMBO_PASS_DELTA_X;
-  float targetY = LIMBO_Y;
-  dbgln("STATE_PASS_LIMBO: drive past limbo");
-  driveToward(targetX, targetY, 0.10f);
+  // float targetX = LIMBO_X + LIMBO_PASS_DELTA_X;
+  // float targetY = LIMBO_Y;
+  // dbgln("STATE_PASS_LIMBO: drive past limbo");
+  // driveToward(targetX, targetY, 0.10f);
+  // brake();
+
+  dbgln("STATE_PASS_LIMBO: extra 2s timed push");
+  unsigned long tPush = millis();
+  while (millis() - tPush < 2000UL) {
+    setM(BASE_PWM, BASE_PWM);
+    delay(10);
+  }
   brake();
 
   dbgln("STATE_FINISH");
