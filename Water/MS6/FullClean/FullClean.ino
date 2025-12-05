@@ -8,7 +8,7 @@
 #define TEAM_NAME   "C'Ryan Me A River"
 #define MISSION     WATER
 #define MARKER_ID   123
-#define ROOM_NUMBER 1116
+#define ROOM_NUMBER 1120
 
 #define WIFI_TX_PIN 8
 #define WIFI_RX_PIN 9
@@ -45,9 +45,9 @@ const float ARENA_X  = 4.0f;
 const float ARENA_Y  = 2.0f;
 
 // Mission A/B
-const float A_X = 0.50f;
+const float A_X = 0.33f;
 const float A_Y = 1.50f;
-const float B_X = 0.50f;
+const float B_X = 0.33f;
 const float B_Y = 0.50f;
 
 // Obstacles (column region)
@@ -85,8 +85,8 @@ const float         DEPTH_STABLE_STD_MM_MAX = 2.0f;
 const int           COLOR_CONFIRM_COUNT     = 5;
 
 // Servo positions
-const int SERVO_STOW_DEG    = 20; //initial angle
-const int SERVO_MEASURE_DEG = 100;
+const int SERVO_STOW_DEG    = 110; //initial angle
+const int SERVO_MEASURE_DEG = 40;
 const int SERVO_MOVE_MS     = 450;
 
 // Color thresholds

@@ -21,7 +21,7 @@ void dbgFloat(float v) {
 #define TEAM_NAME   "C'Ryan Me A River"
 #define MISSION     WATER
 #define MARKER_ID   123
-#define ROOM_NUMBER 1116
+#define ROOM_NUMBER 1120
 
 #define WIFI_TX_PIN 8
 #define WIFI_RX_PIN 9
@@ -58,9 +58,9 @@ const float ARENA_X  = 4.0f;
 const float ARENA_Y  = 2.0f;
 
 // Mission A/B
-const float A_X = 0.50f;
+const float A_X = 0.33f;
 const float A_Y = 1.50f;
-const float B_X = 0.50f;
+const float B_X = 0.33f;
 const float B_Y = 0.50f;
 
 // Obstacles (column region)
