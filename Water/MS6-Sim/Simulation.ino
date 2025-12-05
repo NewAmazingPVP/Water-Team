@@ -22,9 +22,9 @@ const float ARENA_X  = 4.0;
 const float ARENA_Y  = 2.0;
 
 // Mission A/B
-const float A_X = 0.55;
+const float A_X = 0.50;
 const float A_Y = 1.50;
-const float B_X = 0.55;
+const float B_X = 0.50;
 const float B_Y = 0.50;
 
 // Obstacles (column region)
@@ -36,7 +36,7 @@ const int   LIMBO_SIDE_IS_TOP   = 1;
 const float LIMBO_X             = 3.70;
 const float LIMBO_Y             = (LIMBO_SIDE_IS_TOP ? 1.50 : 0.50);
 const float LIMBO_APPR_DIST_M   = 0.40;
-const float LIMBO_PASS_DELTA_X  = 0.50;
+const float LIMBO_PASS_DELTA_X  = 0.10;
 
 // Vision / motion
 const int   BASE_PWM            = 95;
@@ -47,7 +47,7 @@ const unsigned long VISION_WAIT_MS = 6000;
 
 // Obstacle / lane shifting
 const float ULTRA_OBST_STOP_M   = 0.28f;
-const float LANE_SHIFT_M        = 0.35f;
+const float LANE_SHIFT_M        = 0.5f;
 const float EDGE_GUARD_Y_M      = 0.12f;
 
 // Heading control thresholds
@@ -358,36 +358,125 @@ void loop(){
 
   // --- STATE_MEASURE_WATER (SIM: SKIPPED) ---
   dbgln("STATE_MEASURE_WATER (sim only: skipped)");
+// --- STATE_NAV_OBSTACLES ---
+dbgln("STATE_NAV_OBSTACLES");
+if (waitVis()) {
+  // Target is a point just past the obstacle column, in the limbo lane
+  const float goalX       = OBST_COL_X2 + 0.30f;
+  const float laneY       = LIMBO_Y;
+  const float SWIPE_MIN_Y = 0.25f;   // hard lower bound
+  const float SWIPE_MAX_Y = 1.75f;   // hard upper bound
 
-  // --- STATE_NAV_OBSTACLES ---
-//   dbgln("STATE_NAV_OBSTACLES");
-//   if (waitVis()){
-//     unsigned long t0 = millis();
-//     while (Enes100.getX() < (OBST_COL_X2 + 0.30f) && millis() - t0 < 20000){
-//       if (!Enes100.isVisible()){
-//         brake();
-//         dbgln("Obstacles: lost vision waiting...");
-//         if (!waitVis()){
-//           dbgln("Obstacles: vision not recovered breaking");
-//           break;
-//         }
-//       }
-//       float front = ultraM();
-//       if (front < ULTRA_OBST_STOP_M){
-//         dbgln("Obstacles: front blocked sliding lane");
-//         float y = Enes100.getY();
-//         if (y < ARENA_Y / 2.0f) slideLane(+1.0f);
-//         else                    slideLane(-1.0f);
-//       } else {
-//         // simple straight push in obstacle zone
-//         setM(BASE_PWM, BASE_PWM);
-//         delay(20);
-//       }
-//     }
-//     brake();
-//   } else {
-//     dbgln("STATE_NAV_OBSTACLES: skipped (no vision)");
-//   }
+  // Face roughly toward that goal first (heading ~0 rad, +X)
+  dbgln("Obstacles init align forward");
+  turnTo(0.0f);
+
+  unsigned long t0 = millis();
+  while (Enes100.getX() < goalX && millis() - t0 < 25000UL) {
+
+    // If vision drops, stop and wait for it to return
+    if (!Enes100.isVisible()) {
+      brake();
+      dbgln("Obstacles lost vision wait");
+      if (!waitVis()) {
+        dbgln("Obstacles vision not recovered abort obstacle nav");
+        break;
+      }
+      // Re-align once we get vision back
+      dbgln("Obstacles re align forward after vision return");
+      turnTo(0.0f);
+    }
+
+    // Check ultrasonic straight ahead
+    float front = ultraM();
+    if (front < ULTRA_OBST_STOP_M) {
+      // ---- SIDESTEP SEQUENCE WITH Y-LIMITS ----
+      dbgln("Obstacles front blocked sidestep");
+
+      float y = Enes100.getY();
+
+      // Proposed step positions
+      float upY   = y + LANE_SHIFT_M;   // toward top (dir = +1)
+      float downY = y - LANE_SHIFT_M;   // toward bottom (dir = -1)
+
+      float dir;
+
+      // 1) If stepping up would exceed max Y, force step down
+      if (upY > SWIPE_MAX_Y && downY >= SWIPE_MIN_Y) {
+        dir = -1.0f;
+        dbgln("Sidestep choose DOWN due to upper limit");
+      }
+      // 2) If stepping down would go below min Y, force step up
+      else if (downY < SWIPE_MIN_Y && upY <= SWIPE_MAX_Y) {
+        dir = +1.0f;
+        dbgln("Sidestep choose UP due to lower limit");
+      }
+      // 3) If both directions are legal, use lane-based choice
+      else {
+        // If below limbo lane, move up; if above, move down
+        dir = (y < laneY ? +1.0f : -1.0f);
+        dbgln("Sidestep choose based on laneY");
+      }
+
+      // 1) Turn 90° sideways (left or right in world Y)
+      float sideHeading = (dir > 0.0f) ? (PI_F * 0.5f) : -(PI_F * 0.5f);
+      dbgln("Sidestep turn 90");
+      turnTo(sideHeading);
+
+      // 2) Drive sideways until we've moved ~LANE_SHIFT_M in Y
+      float yStart     = Enes100.getY();
+      unsigned long ts = millis();
+      dbgln("Sidestep move sideways");
+      while (fabs(Enes100.getY() - yStart) < (LANE_SHIFT_M * 0.9f) &&
+             millis() - ts < 4000UL &&
+             Enes100.isVisible()) {
+        setM(BASE_PWM, BASE_PWM);
+        delay(20);
+      }
+      brake();
+
+      // 3) Re-orient toward heading 0 (straight +X)
+      dbgln("Sidestep re align forward");
+      turnTo(0.0f);
+
+      // Back to top of loop and re-check ultrasonic / progress
+      continue;
+    }
+
+    // ---- CLEAR AHEAD: MOVE FORWARD WITH HEADING ~0 RAD ----
+    float x       = Enes100.getX();
+    float remaining = goalX - x;
+    if (remaining <= 0.05f) {
+      dbgln("Obstacles reached clear region");
+      break;
+    }
+
+    float th = Enes100.getTheta();
+    float e  = nA(0.0f - th);      // error from perfect +X heading
+
+    float steerF = K_STRAIGHT * e;
+    if (steerF >  60.0f) steerF =  60.0f;
+    if (steerF < -60.0f) steerF = -60.0f;
+    int steer = (int)steerF;
+
+    setM(BASE_PWM - steer, BASE_PWM + steer);
+
+    dbg("Obstacles step x=");
+    dbgFloat(x);
+    dbg(" rem=");
+    dbgFloat(remaining);
+    dbg(" e=");
+    dbgFloat(e);
+    dbgln("");
+
+    delay(30);
+  }
+
+  brake();
+} else {
+  dbgln("STATE_NAV_OBSTACLES skipped no vision");
+}
+
 
   // --- STATE_APPROACH_LIMBO ---
   dbgln("STATE_APPROACH_LIMBO");
