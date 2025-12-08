@@ -11,10 +11,10 @@
 #define ROOM_NUMBER 1120
 
 #define WIFI_TX_PIN 8
-#define WIFI_RX_PIN 9
+#define WIFI_RX_PIN 5   // was 9; move WiFi module TX wire from D9 -> D5
 
 /********************  MOTOR PINS (FROM WORKING REAL CODE)  ********************/
-#define ENA 10
+#define ENA 6           // was 10; move motor driver ENA wire from D10 -> D6 (PWM)
 #define IN1 2
 #define IN2 7
 #define ENB 11
@@ -25,8 +25,8 @@
 #define SERVO_PIN 3
 
 // Ultrasonic (NewPing)
-#define US_TRIG   0
-#define US_ECHO   1
+#define US_TRIG   A5    // was D0; move ultrasonic TRIG wire from D0 -> A5
+#define US_ECHO   A6    // was D1; move ultrasonic ECHO wire from D1 -> A6
 #define US_MAX_CM 200
 
 // Depth sensor (analog)
@@ -36,8 +36,8 @@
 #define TCS_S0  A1
 #define TCS_S1  A2
 #define TCS_S2  4
-#define TCS_S3  5
-#define TCS_OUT 6
+#define TCS_S3  A3      // was D5; move TCS S3 wire from D5 -> A3
+#define TCS_OUT A4      // was D6; move TCS OUT wire from D6 -> A4
 
 /********************  CONSTANTS (MATCH PHYSICAL NAV)  ********************/
 // Frame / arena
@@ -147,6 +147,10 @@ static void brake(){
 
 /********************  ULTRASONIC (REAL, USED BY NAV)  ********************/
 static float ultraM(){
+
+
+  //delay(40); uncomment this if you want to guarantee delay
+
   unsigned int uS = sonar.ping();           // microseconds
   unsigned int cm = sonar.convert_cm(uS);
   if (cm == 0) {
@@ -538,7 +542,7 @@ void loop(){
 
       setM(BASE_PWM - steer, BASE_PWM + steer);
 
-      delay(30);
+      delay(30); //TODO: ULTRASONIC DELAY
     }
 
     brake();
