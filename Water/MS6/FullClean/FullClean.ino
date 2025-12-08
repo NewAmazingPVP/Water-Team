@@ -8,7 +8,7 @@
 #define TEAM_NAME   "C'Ryan Me A River"
 #define MISSION     WATER
 #define MARKER_ID   123
-#define ROOM_NUMBER 1116
+#define ROOM_NUMBER 1120
 
 #define WIFI_TX_PIN 8
 #define WIFI_RX_PIN 5   // was 9; move WiFi module TX wire from D9 -> D5
@@ -25,8 +25,8 @@
 #define SERVO_PIN 3
 
 // Ultrasonic (NewPing)
-#define US_TRIG   A1    // was D0; move ultrasonic TRIG wire from D0 -> A5 (blue)
-#define US_ECHO   A2    // was D1; move ultrasonic ECHO wire from D1 -> A6 (orange)
+#define US_TRIG   A5    // was D0; move ultrasonic TRIG wire from D0 -> A5
+#define US_ECHO   A6    // was D1; move ultrasonic ECHO wire from D1 -> A6
 #define US_MAX_CM 200
 
 // Depth sensor (analog)
@@ -310,13 +310,13 @@ static unsigned long readColorRaw(byte s2, byte s3){
 }
 
 static void tcsBegin(){
-  //pinMode(TCS_S0, OUTPUT);
-  //pinMode(TCS_S1, OUTPUT);
+  pinMode(TCS_S0, OUTPUT);
+  pinMode(TCS_S1, OUTPUT);
   pinMode(TCS_S2, OUTPUT);
   pinMode(TCS_S3, OUTPUT);
   pinMode(TCS_OUT, INPUT);
-  //digitalWrite(TCS_S0, HIGH);
-  //digitalWrite(TCS_S1, HIGH); // 100% freq scaling
+  digitalWrite(TCS_S0, HIGH);
+  digitalWrite(TCS_S1, HIGH); // 100% freq scaling
 }
 
 static bool detectPollutants_5s(){

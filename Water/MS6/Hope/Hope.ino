@@ -2,7 +2,6 @@
 #include <math.h>      // must be before Enes100
 #include <Arduino.h>
 #include "Enes100.h"
-#include <NewPing.h>
 
 /********************  SIMPLE DEBUG HELPERS  ********************/
 const bool DEBUG = true;
@@ -24,19 +23,15 @@ void dbgFloat(float v) {
 #define ROOM_NUMBER 1116                // <-- your room number
 
 #define WIFI_TX_PIN 8
-#define WIFI_RX_PIN 5
+#define WIFI_RX_PIN 9
 
 /********************  MOTOR PINS (FROM WORKING REAL CODE)  ********************/
-#define ENA 6
+#define ENA 10
 #define IN1 2
 #define IN2 7
 #define ENB 11
 #define IN3 12
 #define IN4 13
-
-#define US_TRIG   A1
-#define US_ECHO   A2
-#define US_MAX_CM 200
 
 /********************  CONSTANTS (MATCH PHYSICAL NAV)  ********************/
 // Frame / arena
@@ -44,9 +39,9 @@ const float ARENA_X  = 4.0;
 const float ARENA_Y  = 2.0;
 
 // Mission A/B
-const float A_X = 0.33;
+const float A_X = 0.50;
 const float A_Y = 1.50;
-const float B_X = 0.33;
+const float B_X = 0.50;
 const float B_Y = 0.50;
 
 // Obstacles (column region)
@@ -77,10 +72,8 @@ const float PI_F                = 3.14159265f;
 const float HEADING_SPIN_THRESH = 0.6f;   // rad ~34 deg
 const float DIST_SLOW_RADIUS    = 0.4f;   // start slowing inside 40 cm
 
-
 /********************  GLOBALS  ********************/
 bool ran = false;    // single-run in real robot too
-NewPing sonar(US_TRIG, US_ECHO, US_MAX_CM);
 
 /********************  UTILS  ********************/
 static float nA(float a){
@@ -139,16 +132,11 @@ static void brake(){
 //
 // If you later wire a real ultrasonic, you can implement it here.
 static float ultraM(){
-
-  delay(40);
-  unsigned int uS = sonar.ping();           // microseconds
-  unsigned int cm = sonar.convert_cm(uS);
-  if (cm == 0) {
-    float farM = 5.0f;
-    return farM;                            // out of range → big number
-  }
-  float m = cm / 100.0f;
-  return m;
+  float d = 5.0f;   // 5m = "no obstacle"
+  dbg("ultraM (stub) = ");
+  dbgFloat(d);
+  dbgln("");
+  return d;
 }
 
 /********************  VISION HELPERS  ********************/
