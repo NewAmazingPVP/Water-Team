@@ -33,8 +33,8 @@
 #define DEPTH_AIN A0
 
 // TCS3200 color sensor
-#define TCS_S0  A1
-#define TCS_S1  A2
+//#define TCS_S0  A1
+//#define TCS_S1  A2
 #define TCS_S2  4
 #define TCS_S3  A3      // was D5; move TCS S3 wire from D5 -> A3
 #define TCS_OUT A4      // was D6; move TCS OUT wire from D6 -> A4
@@ -438,7 +438,7 @@ void loop(){
   orientTo(mx, my);
 
   // --- STATE_DRIVE_TO_MISSION (pure vision) ---
-  driveToward(mx, my, 0.025f);   // about 12 cm radius
+  driveToward(mx, my, 0.12f);   // about 12 cm radius
 
   // --- STATE_MEASURE_WATER ---
   arm.write(SERVO_MEASURE_DEG);
