@@ -8,7 +8,7 @@
 #define TEAM_NAME   "C'Ryan Me A River"
 #define MISSION     WATER
 #define MARKER_ID   123
-#define ROOM_NUMBER 1120
+#define ROOM_NUMBER 1116
 
 #define WIFI_TX_PIN 8
 #define WIFI_RX_PIN 5   // was 9; move WiFi module TX wire from D9 -> D5
@@ -25,8 +25,8 @@
 #define SERVO_PIN 3
 
 // Ultrasonic (NewPing)
-#define US_TRIG   A5    // was D0; move ultrasonic TRIG wire from D0 -> A5
-#define US_ECHO   A6    // was D1; move ultrasonic ECHO wire from D1 -> A6
+#define US_TRIG   A1    // was D0; move ultrasonic TRIG wire from D0 -> A5
+#define US_ECHO   A2    // was D1; move ultrasonic ECHO wire from D1 -> A6
 #define US_MAX_CM 200
 
 // Depth sensor (analog)
@@ -149,7 +149,7 @@ static void brake(){
 static float ultraM(){
 
 
-  //delay(40); uncomment this if you want to guarantee delay
+  delay(50); //uncomment this if you want to guarantee delay
 
   unsigned int uS = sonar.ping();           // microseconds
   unsigned int cm = sonar.convert_cm(uS);
@@ -180,7 +180,7 @@ static void turnTo(float tgt, unsigned long t = 3500){
     float th = Enes100.getTheta();
     float e  = nA(tgt - th);
 
-    if (fabs(e) < 0.03f){  // ~2 deg
+    if (fabs(e) < 0.1f){  // ~2 deg
       break;
     }
 
@@ -247,7 +247,7 @@ static bool driveToward(float tx, float ty, float stopDistM){
       float scale = 1.0f;
       if (dist < DIST_SLOW_RADIUS){
         scale = dist / DIST_SLOW_RADIUS;  // 0..1
-        if (scale < 0.4f) scale = 0.4f;   // avoid stalling
+        if (scale < 0.6f) scale = 0.6f;   // avoid stalling
       }
       int base = (int)(BASE_PWM * scale);
 
@@ -310,13 +310,13 @@ static unsigned long readColorRaw(byte s2, byte s3){
 }
 
 static void tcsBegin(){
-  pinMode(TCS_S0, OUTPUT);
-  pinMode(TCS_S1, OUTPUT);
+  //pinMode(TCS_S0, OUTPUT);
+  //pinMode(TCS_S1, OUTPUT);
   pinMode(TCS_S2, OUTPUT);
   pinMode(TCS_S3, OUTPUT);
   pinMode(TCS_OUT, INPUT);
-  digitalWrite(TCS_S0, HIGH);
-  digitalWrite(TCS_S1, HIGH); // 100% freq scaling
+  //digitalWrite(TCS_S0, HIGH);
+  //digitalWrite(TCS_S1, HIGH); // 100% freq scaling
 }
 
 static bool detectPollutants_5s(){
@@ -408,6 +408,11 @@ void setup(){
 }
 
 void loop(){
+//  while(true){
+//    Enes100.print("val: ");
+//    Enes100.println((int)ultraM);
+//  }
+  
   if (ran) return;
 
   // Decide mission site A/B using same heuristic as your real code
@@ -430,7 +435,7 @@ void loop(){
   orientTo(mx, my);
 
   // --- STATE_DRIVE_TO_MISSION (pure vision) ---
-  driveToward(mx, my, 0.12f);   // about 12 cm radius
+  driveToward(mx, my, 0.025f);   // about 12 cm radius
 
   // --- STATE_MEASURE_WATER ---
   arm.write(SERVO_MEASURE_DEG);

@@ -23,7 +23,7 @@ void dbgFloat(float v) {
 #define ROOM_NUMBER 1116                // <-- your room number
 
 #define WIFI_TX_PIN 8
-#define WIFI_RX_PIN 9
+#define WIFI_RX_PIN 5
 
 /********************  MOTOR PINS (FROM WORKING REAL CODE)  ********************/
 #define ENA 10
@@ -39,9 +39,9 @@ const float ARENA_X  = 4.0;
 const float ARENA_Y  = 2.0;
 
 // Mission A/B
-const float A_X = 0.50;
+const float A_X = 0.33;
 const float A_Y = 1.50;
-const float B_X = 0.50;
+const float B_X = 0.33;
 const float B_Y = 0.50;
 
 // Obstacles (column region)
