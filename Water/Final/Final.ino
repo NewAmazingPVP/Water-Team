@@ -8,7 +8,7 @@
 #define TEAM_NAME   "C'Ryan Me A River"
 #define MISSION     WATER
 #define MARKER_ID   123
-#define ROOM_NUMBER 1116
+#define ROOM_NUMBER 1201
 
 #define WIFI_TX_PIN 8
 #define WIFI_RX_PIN 5   // was 9; move WiFi module TX wire from D9 -> D5
@@ -98,7 +98,7 @@ const unsigned long TCS_RED_MAX     = 78;
 const int           TCS_MIN_SAMPLES = 25;
 
 // put with your other constants
-const float OBST_EXIT_X = 2.85f;  // just into the Open Zone (past 2.80 m)
+//const float OBST_EXIT_X = 2.85f;  // just into the Open Zone (past 2.80 m)
 // Edge-follow backup routing
 const float WALL_CLEAR_Y     = 0.10f;        // 10 cm from wall
 const float START_CURVE_X    = 1.10f;        // where we meet the edge smoothly
@@ -165,7 +165,7 @@ static void brake(){
 static float ultraM(){
 
 
-  delay(50); //uncomment this if you want to guarantee delay
+  //delay(50); //uncomment this if you want to guarantee delay
 
   unsigned int uS = sonar.ping();           // microseconds
   unsigned int cm = sonar.convert_cm(uS);
@@ -477,36 +477,7 @@ void setup(){
 }
 
 void loop(){
-  /*********** ULTRASONIC BENCH TEST — set to 1 to enable ***********/
-  #if 0
-  while (true) {
-    float d = ultraM();                      // meters
-    Enes100.print("US(m)="); Enes100.println(d, 3);
-
-    // Map distance to servo angle (near = down, far = up)
-    int span = (SERVO_STOW_DEG - SERVO_MEASURE_DEG);
-    int a = SERVO_STOW_DEG;
-    if (d < 0.60f) {                         // map 5–60 cm into the span
-      float cm = d * 100.0f;
-      float t = constrain((cm - 5.0f) / (60.0f - 5.0f), 0.0f, 1.0f);
-      a = SERVO_STOW_DEG - (int)(span * (1.0f - t));
-    }
-    arm.write(a);
-
-    // Physical cue: when close, tap forward/back so you can SEE it
-    if (d > 0.0f && d < 0.30f) {
-      setM(120,120); delay(150);
-      setM(-120,-120); delay(150);
-      brake(); delay(150);
-    } else {
-      brake();
-    }
-
-    delay(60); // keep ping rate reasonable
-  }
-  #endif
-  /*********** end bench test ***********/
-
+  runPumpMs(10000);
   
   if (ran) return;
 
