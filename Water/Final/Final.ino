@@ -418,9 +418,9 @@ static int stableDepthMM_5s(){
   }
   float sd = sqrtf(var / N);
 
-  if (sd > DEPTH_STABLE_STD_MM_MAX){
-    return -1; // unstable
-  }
+  //   if (sd > DEPTH_STABLE_STD_MM_MAX){
+  //   return -1; // unstable
+  // }
 
   int mm = (int)roundf(mean);
   if (mm < 0) mm = 0;
@@ -517,10 +517,11 @@ void loop(){
   bool polluted = false;
   int  depthMM  = -1;
 
-  depthMM = stableDepthMM_5s();
-
   // 5s color measurement
   polluted = detectPollutants_5s();
+
+  
+  depthMM = stableDepthMM_5s();
 
   runPumpMs(24000);
 
