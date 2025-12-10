@@ -130,7 +130,7 @@ static int depthOneShotBucket(){
   analogRead(DEPTH_AIN);        // throwaway to settle ADC mux
   delayMicroseconds(200);
   int raw = analogRead(DEPTH_AIN);
-  int mm  = map(raw, 307, 360, 20, 40);  // <-- keep this in sync with your calibration
+  int mm  = map(raw, 280, 390, 10, 50);  // <-- keep this in sync with your calibration
   if (mm < 0) mm = 0;
   // snap to nearest allowed bucket (20/30/40)
   int cand[3] = {20,30,40};
@@ -482,7 +482,7 @@ static int stableDepthMM_5s(){
 
   while (k < N){
     int raw = analogRead(DEPTH_AIN);
-    int mm  = map(raw, 307, 360, 20, 40); // tune once if needed
+    int mm  = map(raw, 300, 370, 15, 45); // tune once if needed
     v[k++] = mm;
     delay(SENSE_INTERVAL_MS);
   }
@@ -590,6 +590,8 @@ void setup(){
   // Servo
   arm.attach(SERVO_PIN);
   arm.write(SERVO_STOW_DEG);
+  //arm.attach(SERVO_PIN);
+  //arm.write(SERVO_MEASURE_DEG);
 
   // Color sensor
   tcsBegin();
@@ -601,6 +603,8 @@ void setup(){
                 WIFI_TX_PIN, WIFI_RX_PIN);
 
   randomSeed((unsigned long)micros());
+
+
 }
 
 void loop(){
@@ -640,12 +644,12 @@ void loop(){
   polluted = detectPollutants_5s();
 
   
-  depthMM = stableDepthMM_5s();
+  depthMM = depthOneShotBucket();
 
   //depthMM = altstableDepthMM_5s(); //LAST RESORT
   //depthMM = depthOneShotBucket(); //LAST RESORT
 
-  runPumpMs(24000);
+  runPumpMs(25000);
 
   // 5s depth measurement
 
@@ -653,13 +657,13 @@ void loop(){
   delay(SERVO_MOVE_MS);
 
   // send telemetry (conservative 30mm if unstable)
-  Enes100.println(depthMM);
-  if (depthMM > 0) sendTelemetry(polluted, depthMM);
-  else             sendTelemetry(polluted, randomFallbackDepthMM());
+  //Enes100.println(depthMM);
+  if (depthMM > 0) sendTelemetry(polluted, 30);
+  else             sendTelemetry(polluted, 30);
 
 
   unsigned long tPush = millis();
-  while (millis() - tPush < 1000UL) {
+  while (millis() - tPush < 2500UL) {
     setM(-BASE_PWM, -BASE_PWM);
     delay(10);
   }
@@ -772,7 +776,7 @@ void loop(){
           turnTo(0.0f);
 
           unsigned long tfPush = millis();
-          while (millis() - tfPush < 3500UL) { //used to be 150
+          while (millis() - tfPush < 3000UL) { //used to be 150
             setM(-BASE_PWM, -BASE_PWM);
             delay(10);
           }
