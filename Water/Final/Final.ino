@@ -50,7 +50,7 @@ const float ARENA_Y  = 2.0f;
 // Mission A/B
 const float A_X = 0.33f;
 const float A_Y = 1.50f;
-const float B_X = 0.33f;
+const float B_X = 0.29f;
 const float B_Y = 0.50f;
 
 // Obstacles (column region)
@@ -73,7 +73,7 @@ const unsigned long VISION_WAIT_MS = 6000;
 
 // Obstacle / lane shifting
 const float ULTRA_OBST_STOP_M   = 0.25f;
-const float LANE_SHIFT_M        = 0.67f;
+const float LANE_SHIFT_M        = 0.67f; // trolling!!!!!
 const float EDGE_GUARD_Y_M      = 0.12f;
 
 // Heading control thresholds
@@ -197,7 +197,7 @@ static void turnTo(float tgt, unsigned long t = 3500){
     float th = Enes100.getTheta();
     float e  = nA(tgt - th);
 
-    if (fabs(e) < 0.08f){  // TODO: TUNE THIS
+    if (fabs(e) < 0.04f){  // TODO: TUNE THIS
       break;
     }
 
@@ -402,8 +402,7 @@ static int stableDepthMM_5s(){
 
   while (k < N){
     int raw = analogRead(DEPTH_AIN);
-    Enes100.println(raw);
-    int mm  = map(raw, 0, 150, 0, 40); // tune once if needed
+    int mm  = map(raw, 307, 360, 20, 40); // tune once if needed
     v[k++] = mm;
     delay(SENSE_INTERVAL_MS);
   }
@@ -519,6 +518,8 @@ void loop(){
   bool polluted = false;
   int  depthMM  = -1;
 
+  depthMM = stableDepthMM_5s();
+
   // 5s color measurement
   polluted = detectPollutants_5s();
 
@@ -531,6 +532,14 @@ void loop(){
   Enes100.println(depthMM);
   if (depthMM > 0) sendTelemetry(polluted, depthMM);
   else             sendTelemetry(polluted, 100);
+
+
+  unsigned long tPush = millis();
+  while (millis() - tPush < 1000UL) {
+    setM(-BASE_PWM, -BASE_PWM);
+    delay(10);
+  }
+  brake();
 
   bool toggle = false;
   // --- STATE_NAV_OBSTACLES ---
@@ -624,7 +633,7 @@ void loop(){
         }
         float accuY      = yStart;
         unsigned long ts = millis();
-        while (fabs(accuY - yStart) < (LANE_SHIFT_M * 0.9f)) {
+        while (fabs(accuY - yStart) < (LANE_SHIFT_M * 0.95f)) {
           setM(BASE_PWM, BASE_PWM);
           delay(20);
           float transient = Enes100.getY();
@@ -637,8 +646,8 @@ void loop(){
         // 3) Re-orient toward heading 0 (straight +X)
         turnTo(0.0f);
 
-        unsigned long tPush = millis();
-        while (millis() - tPush < 1000UL) {
+        unsigned long tfPush = millis();
+        while (millis() - tfPush < 3500UL) { //used to be 150
           setM(-BASE_PWM, -BASE_PWM);
           delay(10);
         }
@@ -694,8 +703,8 @@ void loop(){
   // driveToward(targetX, targetY, 0.10f);
   // brake();
 
-  unsigned long tPush = millis();
-  while (millis() - tPush < 5000UL) {
+  unsigned long tePush = millis();
+  while (millis() - tePush < 5000UL) {
     setM(BASE_PWM, BASE_PWM);
     delay(10);
   }
