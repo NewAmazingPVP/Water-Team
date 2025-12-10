@@ -745,37 +745,56 @@ void loop(){
 
         }
 
-        // 1) Turn 90° sideways (left or right in world Y)
-        float sideHeading = (dir > 0.0f) ? (PI_F * 0.5f) : -(PI_F * 0.5f);
-        turnTo(sideHeading);
+        if (true){
+          // 1) Turn 90° sideways (left or right in world Y)
+          float sideHeading = (dir > 0.0f) ? (PI_F * 0.5f) : -(PI_F * 0.5f);
+          turnTo(sideHeading);
 
-        // 2) Drive sideways until we've moved ~LANE_SHIFT_M in Y
-        float yStart     = Enes100.getY();
-        while (yStart == -1) {
-          delay(5);
-          yStart     = Enes100.getY();
-        }
-        float accuY      = yStart;
-        unsigned long ts = millis();
-        while (fabs(accuY - yStart) < (LANE_SHIFT_M * 0.95f)) {
-          setM(BASE_PWM, BASE_PWM);
-          delay(20);
-          float transient = Enes100.getY();
-          if (transient != -1) {
-            accuY = transient;
+          // 2) Drive sideways until we've moved ~LANE_SHIFT_M in Y
+          float yStart     = Enes100.getY();
+          while (yStart == -1) {
+            delay(5);
+            yStart     = Enes100.getY();
           }
-        }
-        brake();
+          float accuY      = yStart;
+          unsigned long ts = millis();
+          while (fabs(accuY - yStart) < (LANE_SHIFT_M * 0.95f)) {
+            setM(BASE_PWM, BASE_PWM);
+            delay(20);
+            float transient = Enes100.getY();
+            if (transient != -1) {
+              accuY = transient;
+            }
+          }
+          brake();
 
-        // 3) Re-orient toward heading 0 (straight +X)
-        turnTo(0.0f);
+          // 3) Re-orient toward heading 0 (straight +X)
+          turnTo(0.0f);
 
-        unsigned long tfPush = millis();
-        while (millis() - tfPush < 3500UL) { //used to be 150
-          setM(-BASE_PWM, -BASE_PWM);
-          delay(10);
-        }
-        brake();
+          unsigned long tfPush = millis();
+          while (millis() - tfPush < 3500UL) { //used to be 150
+            setM(-BASE_PWM, -BASE_PWM);
+            delay(10);
+          }
+          brake();
+      } else {
+          // 1) Hold a true ±90° heading and translate in Y (closed-loop)
+          float sideHeading = (dir > 0.0f) ? (PI_F * 0.5f) : -(PI_F * 0.5f);
+          float xStart = Enes100.getX();
+          float yStart = Enes100.getY();
+          float yGoal  = yStart + dir * LANE_SHIFT_M;
+          // clamp to arena margins
+          if (yGoal < EDGE_GUARD_Y_M)            yGoal = EDGE_GUARD_Y_M;
+          if (yGoal > ARENA_Y - EDGE_GUARD_Y_M)  yGoal = ARENA_Y - EDGE_GUARD_Y_M;
+
+          turnTo(sideHeading);
+          driveTowardHoldHeading(xStart, yGoal, sideHeading, 0.04f); // ~4 cm tolerance
+          brake();
+
+          // 2) Re-orient toward heading 0 (straight +X)
+          turnTo(0.0f);
+
+      }
 
         // Back to top of loop and re-check ultrasonic / progress
         continue;
