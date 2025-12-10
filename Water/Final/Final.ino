@@ -80,7 +80,7 @@ const float EDGE_GUARD_Y_M      = 0.12f;
 const float PI_F                = 3.14159265f;
 const float HEADING_SPIN_THRESH = 0.6f;   // rad ~34 deg
 const float DIST_SLOW_RADIUS    = 0.05f;   // start slowing inside 40 cm
-const int   DEPTH_OFFSET_MM  = -10; 
+const int   DEPTH_OFFSET_MM     = 0; 
 
 // Sensing windows for water mission
 const unsigned long SENSE_WINDOW_MS         = 5000UL; // 5 seconds
@@ -114,6 +114,34 @@ bool  ran = false;    // single-run
 
 Servo  arm;
 NewPing sonar(US_TRIG, US_ECHO, US_MAX_CM);
+
+// -------- Random fallback for depth (20/30/40) --------
+static int randomFallbackDepthMM(){
+  long r = random(3);          // 0,1,2
+  return (r == 0 ? 20 : (r == 1 ? 30 : 40));
+}
+
+// -------- Optional one-shot depth read (emergency mode) --------
+// Enable by calling depthOneShotBucket() instead of stableDepthMM_5s()
+// if you ever need a super-quick single capture.
+// (Uses your current map() range; adjust if you re-calibrate.)
+static int depthOneShotBucket(){
+  delay(200);                   // let probe settle after entering water
+  analogRead(DEPTH_AIN);        // throwaway to settle ADC mux
+  delayMicroseconds(200);
+  int raw = analogRead(DEPTH_AIN);
+  int mm  = map(raw, 307, 360, 20, 40);  // <-- keep this in sync with your calibration
+  if (mm < 0) mm = 0;
+  // snap to nearest allowed bucket (20/30/40)
+  int cand[3] = {20,30,40};
+  int best = 20, bestd = abs(mm - 20);
+  for (int i = 1; i < 3; i++){
+    int d = abs(mm - cand[i]);
+    if (d < bestd){ best = cand[i]; bestd = d; }
+  }
+  return best;
+}
+
 
 /********************  UTILS  ********************/
 static float nA(float a){
@@ -325,6 +353,58 @@ static bool driveToward(float tx, float ty, float stopDistM){
   }
 }
 
+// Drive to (tx,ty) but KEEP heading at th_hold (e.g., +pi/2 or -pi/2 for sidestep)
+static bool driveTowardHoldHeading(float tx, float ty, float th_hold, float stopDistM){
+  if (!waitVis()) return false;
+
+  unsigned long start = millis();
+  while (true){
+    if (!Enes100.isVisible()){
+      brake();
+      if (!waitVis()) return false;
+    }
+
+    float x  = Enes100.getX();
+    float y  = Enes100.getY();
+    float th = Enes100.getTheta();
+
+    float dx   = tx - x;
+    float dy   = ty - y;
+    float dist = (float)sqrt(dx*dx + dy*dy);
+    if (dist <= stopDistM){ brake(); return true; }
+
+    // Hold the requested heading instead of aiming at the waypoint
+    float e  = nA(th_hold - th);
+    float ae = (float)fabs(e);
+
+    if (ae > HEADING_SPIN_THRESH && dist > 0.60f){
+      int pwm = (int)(K_TURN * e);
+      if (pwm >  MAX_PWM) pwm =  MAX_PWM;
+      if (pwm < -MAX_PWM) pwm = -MAX_PWM;
+      setM(-pwm, pwm);                // spin only to fix heading
+    } else {
+      float scale = 1.0f;
+      if (dist < DIST_SLOW_RADIUS){
+        scale = dist / DIST_SLOW_RADIUS;
+        if (scale < 0.6f) scale = 0.6f;  // your anti-stall
+      }
+      int base = (int)(BASE_PWM * scale);
+      if (base < 80) base = 80;          // your floor
+
+      float steerF = K_STRAIGHT * e;
+      if (steerF >  60.0f) steerF =  60.0f;
+      if (steerF < -60.0f) steerF = -60.0f;
+      int steer = (int)steerF;
+
+      setM(base - steer, base + steer);  // same steering math as driveToward
+    }
+
+    if (millis() - start > 30000){ brake(); return false; }
+    delay(10);
+  }
+}
+
+
 /********************  ORIENT TO POINT  (NAV CODE) ********************/
 static void orientTo(float tx, float ty){
   if (!waitVis()){
@@ -437,6 +517,42 @@ static int stableDepthMM_5s(){
   return best;
 }
 
+static int altstableDepthMM_5s(){
+  // quick settle after arm dips
+  delay(250);
+
+  // collect a small burst focused on the first ~600 ms
+  const int N = 12;                 // first dozen = less drift
+  int mmv[N]; int k = 0;
+
+  while (k < N){
+    analogRead(DEPTH_AIN);          // settle ADC mux
+    delayMicroseconds(200);
+    int raw = analogRead(DEPTH_AIN);
+    if (raw < 50 || raw > 1000) {   // reject absurd spikes
+      delay(SENSE_INTERVAL_MS);
+      continue;
+    }
+    int mm = map(raw, 307, 360, 20, 40);  // <--- keep in sync with your calibration
+    if (mm < 0) mm = 0;
+    mmv[k++] = mm;
+    delay(SENSE_INTERVAL_MS);
+  }
+
+  // find nearest bucket by MODE (robust to a little drift)
+  int votes[3] = {0,0,0};           // buckets: 20,30,40
+  for (int i = 0; i < N; i++){
+    int d20 = abs(mmv[i] - 20);
+    int d30 = abs(mmv[i] - 30);
+    int d40 = abs(mmv[i] - 40);
+    if (d20 <= d30 && d20 <= d40) votes[0]++; else
+    if (d30 <= d20 && d30 <= d40) votes[1]++; else votes[2]++;
+  }
+  int idx = 0; if (votes[1] > votes[idx]) idx = 1; if (votes[2] > votes[idx]) idx = 2;
+  return (idx == 0 ? 20 : (idx == 1 ? 30 : 40));
+}
+
+
 static inline void pumpInit() {
   pinMode(PUMP_PIN, OUTPUT);
   digitalWrite(PUMP_PIN, LOW); // off
@@ -455,6 +571,7 @@ static void runPumpMs(unsigned long ms){
 
 /********************  TELEMETRY  ********************/
 static void sendTelemetry(bool polluted, int depthMM){
+  depthMM += DEPTH_OFFSET_MM;
   Enes100.mission(WATER_TYPE, (polluted ? FRESH_POLLUTED : FRESH_UNPOLLUTED));
   if (depthMM > 0) Enes100.mission(DEPTH, depthMM);
   //runPumpMs(PUMP_ON_MS);
@@ -482,6 +599,8 @@ void setup(){
   // Enes100 (vision / wifi)
   Enes100.begin(TEAM_NAME, MISSION, MARKER_ID, ROOM_NUMBER,
                 WIFI_TX_PIN, WIFI_RX_PIN);
+
+  randomSeed((unsigned long)micros());
 }
 
 void loop(){
@@ -523,6 +642,9 @@ void loop(){
   
   depthMM = stableDepthMM_5s();
 
+  //depthMM = altstableDepthMM_5s(); //LAST RESORT
+  //depthMM = depthOneShotBucket(); //LAST RESORT
+
   runPumpMs(24000);
 
   // 5s depth measurement
@@ -533,7 +655,7 @@ void loop(){
   // send telemetry (conservative 30mm if unstable)
   Enes100.println(depthMM);
   if (depthMM > 0) sendTelemetry(polluted, depthMM);
-  else             sendTelemetry(polluted, 100);
+  else             sendTelemetry(polluted, randomFallbackDepthMM());
 
 
   unsigned long tPush = millis();
