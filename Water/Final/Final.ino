@@ -8,7 +8,7 @@
 #define TEAM_NAME   "C'Ryan Me A River"
 #define MISSION     WATER
 #define MARKER_ID   123
-#define ROOM_NUMBER 1120
+#define ROOM_NUMBER 1116
 
 #define WIFI_TX_PIN 8
 #define WIFI_RX_PIN 5   // was 9; move WiFi module TX wire from D9 -> D5
@@ -61,7 +61,7 @@ const float OBST_COL_X2 = 2.30f;
 const int   LIMBO_SIDE_IS_TOP   = 1;
 const float LIMBO_X             = 3.70f;
 const float LIMBO_Y             = (LIMBO_SIDE_IS_TOP ? 1.70f : 0.50f);
-const float LIMBO_APPR_DIST_M   = 0.40f;
+const float LIMBO_APPR_DIST_M   = 0.10f;
 const float LIMBO_PASS_DELTA_X  = 0.10f;
 
 // Vision / motion
@@ -72,8 +72,8 @@ const int   MAX_PWM             = 180;
 const unsigned long VISION_WAIT_MS = 6000;
 
 // Obstacle / lane shifting
-const float ULTRA_OBST_STOP_M   = 0.35f;
-const float LANE_SHIFT_M        = 0.50f;
+const float ULTRA_OBST_STOP_M   = 0.25f;
+const float LANE_SHIFT_M        = 0.67f;
 const float EDGE_GUARD_Y_M      = 0.12f;
 
 // Heading control thresholds
@@ -402,6 +402,7 @@ static int stableDepthMM_5s(){
 
   while (k < N){
     int raw = analogRead(DEPTH_AIN);
+    Enes100.println(raw);
     int mm  = map(raw, 0, 150, 0, 40); // tune once if needed
     v[k++] = mm;
     delay(SENSE_INTERVAL_MS);
@@ -455,7 +456,6 @@ static void runPumpMs(unsigned long ms){
 
 /********************  TELEMETRY  ********************/
 static void sendTelemetry(bool polluted, int depthMM){
-  depthMM += DEPTH_OFFSET_MM;
   Enes100.mission(WATER_TYPE, (polluted ? FRESH_POLLUTED : FRESH_UNPOLLUTED));
   if (depthMM > 0) Enes100.mission(DEPTH, depthMM);
   //runPumpMs(PUMP_ON_MS);
@@ -523,16 +523,19 @@ void loop(){
   polluted = detectPollutants_5s();
 
   // 5s depth measurement
-  depthMM = stableDepthMM_5s();
 
   arm.write(SERVO_STOW_DEG);
   delay(SERVO_MOVE_MS);
 
   // send telemetry (conservative 30mm if unstable)
+  Enes100.println(depthMM);
   if (depthMM > 0) sendTelemetry(polluted, depthMM);
-  else             sendTelemetry(polluted, 30);
+  else             sendTelemetry(polluted, 100);
 
+  bool toggle = false;
   // --- STATE_NAV_OBSTACLES ---
+  driveToward(0.8,1.0,0.08);
+  turnTo(0);
   if (waitVis()) {
     // Target is a point just past the obstacle column, in the limbo lane
     const float goalX       = OBST_COL_X2 + 0.30f;
@@ -580,7 +583,33 @@ void loop(){
         // 3) If both directions are legal, use lane-based choice
         else {
           // If below limbo lane, move up; if above, move down
-          dir = (y < laneY ? +1.0f : -1.0f);
+          //dir = (y < laneY ? +1.0f : -1.0f);
+
+          if (toggle){
+            dir = -1.0f;
+          } else {
+            dir = +1.0f;
+          }
+          toggle = !toggle;
+
+
+//          if (toggle){
+//             if (abs(my - A_Y) < abs(mx - B_Y)){
+//              dir = -1.0f;
+//             } else {
+//              dir = 1.0f;
+//             } 
+//          } else {
+//             if (abs(my - A_Y) < abs(mx - B_Y)){
+//              dir = +1.0f;
+//             } else {
+//              dir = -1.0f;
+//             } 
+//          }
+//          toggle = !toggle;
+//
+
+
         }
 
         // 1) Turn 90° sideways (left or right in world Y)
@@ -589,17 +618,31 @@ void loop(){
 
         // 2) Drive sideways until we've moved ~LANE_SHIFT_M in Y
         float yStart     = Enes100.getY();
+        while (yStart == -1) {
+          delay(5);
+          yStart     = Enes100.getY();
+        }
+        float accuY      = yStart;
         unsigned long ts = millis();
-        while (fabs(Enes100.getY() - yStart) < (LANE_SHIFT_M * 0.9f) &&
-               millis() - ts < 4000UL &&
-               Enes100.isVisible()) {
+        while (fabs(accuY - yStart) < (LANE_SHIFT_M * 0.9f)) {
           setM(BASE_PWM, BASE_PWM);
           delay(20);
+          float transient = Enes100.getY();
+          if (transient != -1) {
+            accuY = transient;
+          }
         }
         brake();
 
         // 3) Re-orient toward heading 0 (straight +X)
         turnTo(0.0f);
+
+        unsigned long tPush = millis();
+        while (millis() - tPush < 1000UL) {
+          setM(-BASE_PWM, -BASE_PWM);
+          delay(10);
+        }
+        brake();
 
         // Back to top of loop and re-check ultrasonic / progress
         continue;
@@ -631,96 +674,6 @@ void loop(){
   }
 
 
-
-// /*********** STATE_NAV_OBSTACLES with BACKUP ***********/
-// //dbgln("STATE_NAV_OBSTACLES");
-// if (waitVis()) {
-//   const float goalX       = OBST_COL_X2 + 0.30f;
-//   const float laneY       = LIMBO_Y;
-//   const float SWIPE_MIN_Y = 0.25f;
-//   const float SWIPE_MAX_Y = 1.75f;
-
-//   // Quick self-test: if US returns "very far" repeatedly, assume dead.
-//   int usDead = 0;
-//   for (int i = 0; i < 6; i++) { if (ultraM() >= 4.5f) usDead++; delay(50); }
-//   if (true) { //usDead >= 5
-//   //  dbgln("Ultrasonic appears offline -> BACKUP EDGE BYPASS");
-//     backupEdgeBypass();
-//   } else {
-//     //dbgln("Obstacles init align forward");
-//     turnTo(0.0f);
-
-//     unsigned long t0 = millis();
-//     int stale = 0;       // consecutive "far" readings (sensor failing)
-//     bool fallBack = false;
-
-//     while (Enes100.getX() < goalX && millis() - t0 < 25000UL) {
-//       if (!Enes100.isVisible()) {
-//         brake();
-//         if (!waitVis()) { break; }
-//         turnTo(0.0f);
-//       }
-
-//       float front = ultraM();
-//       if (true) {               // looks like sensor not reading
-//         if (++stale > 10) { fallBack = true; break; }
-//       } else stale = 0;
-
-//       if (front < ULTRA_OBST_STOP_M) {
-//         // ---- sidestep with y-limits ----
-//         float y = Enes100.getY();
-//         float upY   = y + LANE_SHIFT_M;
-//         float downY = y - LANE_SHIFT_M;
-//         float dir;
-
-//         if (upY > SWIPE_MAX_Y && downY >= SWIPE_MIN_Y)      dir = -1.0f;
-//         else if (downY < SWIPE_MIN_Y && upY <= SWIPE_MAX_Y) dir = +1.0f;
-//         else                                                dir = (y < laneY ? +1.0f : -1.0f);
-
-//         float sideHeading = (dir > 0.0f) ? (PI_F * 0.5f) : -(PI_F * 0.5f);
-//         turnTo(sideHeading);
-
-//         float yStart = Enes100.getY();
-//         unsigned long ts = millis();
-//         while (fabs(Enes100.getY() - yStart) < (LANE_SHIFT_M * 0.9f) &&
-//                millis() - ts < 4000UL &&
-//                Enes100.isVisible()) {
-//           setM(BASE_PWM, BASE_PWM);
-//           delay(20);
-//         }
-//         brake();
-//         turnTo(0.0f);
-//         continue;
-//       }
-
-//       // forward with heading 0
-//       float x = Enes100.getX();
-//       float remaining = goalX - x;
-//       if (remaining <= 0.05f) break;
-
-//       float th = Enes100.getTheta();
-//       float e  = nA(0.0f - th);
-//       float steerF = K_STRAIGHT * e;
-//       if (steerF >  60.0f) steerF =  60.0f;
-//       if (steerF < -60.0f) steerF = -60.0f;
-//       int steer = (int)steerF;
-//       setM(BASE_PWM - steer, BASE_PWM + steer);
-//       delay(30);
-//     }
-//     brake();
-//     if (fallBack) {
-//    //   dbgln("Switching to BACKUP EDGE BYPASS mid-run");
-//       backupEdgeBypass();
-//     }
-//   }
-// } else {
-//  // dbgln("STATE_NAV_OBSTACLES skipped no vision");
-// }
-// /*********** end state ***********/
-
-
-
-
   // --- STATE_APPROACH_LIMBO ---
   orientTo(LIMBO_X, LIMBO_Y);
   driveToward(LIMBO_X, LIMBO_Y, LIMBO_APPR_DIST_M);
@@ -742,7 +695,7 @@ void loop(){
   // brake();
 
   unsigned long tPush = millis();
-  while (millis() - tPush < 2000UL) {
+  while (millis() - tPush < 5000UL) {
     setM(BASE_PWM, BASE_PWM);
     delay(10);
   }
