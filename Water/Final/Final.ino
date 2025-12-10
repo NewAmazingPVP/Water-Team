@@ -8,7 +8,7 @@
 #define TEAM_NAME   "C'Ryan Me A River"
 #define MISSION     WATER
 #define MARKER_ID   123
-#define ROOM_NUMBER 1201
+#define ROOM_NUMBER 1120
 
 #define WIFI_TX_PIN 8
 #define WIFI_RX_PIN 5   // was 9; move WiFi module TX wire from D9 -> D5
@@ -227,6 +227,13 @@ static void backupEdgeBypass() {
   const float yEdgeTop    = ARENA_Y - WALL_CLEAR_Y;   // ~1.90
   const float yEdgeBottom = WALL_CLEAR_Y;             // ~0.10
   float yEdge = (y0 < ARENA_Y * 0.5f) ? yEdgeBottom : yEdgeTop;
+
+  unsigned long tPush = millis();
+  while (millis() - tPush < 1500UL) {
+    setM(-BASE_PWM, -BASE_PWM);
+    delay(10);
+  }
+  brake();
 
   // 0) small bump-out in +X so we don’t scrape at start
   driveToward(x0 + BUMP_OUT_X, y0, 0.05f);
@@ -477,7 +484,7 @@ void setup(){
 }
 
 void loop(){
-  runPumpMs(10000);
+  //runPumpMs(10000);
   
   if (ran) return;
 
@@ -523,63 +530,155 @@ void loop(){
   if (depthMM > 0) sendTelemetry(polluted, depthMM);
   else             sendTelemetry(polluted, 30);
 
-  // --- STATE_NAV_OBSTACLES ---
-  if (waitVis()) {
-    // Target is a point just past the obstacle column, in the limbo lane
-    const float goalX       = OBST_COL_X2 + 0.30f;
-    const float laneY       = LIMBO_Y;
-    const float SWIPE_MIN_Y = 0.25f;   // hard lower bound
-    const float SWIPE_MAX_Y = 1.75f;   // hard upper bound
+  // // --- STATE_NAV_OBSTACLES ---
+  // if (waitVis()) {
+  //   // Target is a point just past the obstacle column, in the limbo lane
+  //   const float goalX       = OBST_COL_X2 + 0.30f;
+  //   const float laneY       = LIMBO_Y;
+  //   const float SWIPE_MIN_Y = 0.25f;   // hard lower bound
+  //   const float SWIPE_MAX_Y = 1.75f;   // hard upper bound
 
-    // Face roughly toward that goal first (heading ~0 rad, +X)
+  //   // Face roughly toward that goal first (heading ~0 rad, +X)
+  //   turnTo(0.0f);
+
+  //   unsigned long t0 = millis();
+  //   while (Enes100.getX() < goalX && millis() - t0 < 25000UL) {
+
+  //     // If vision drops, stop and wait for it to return
+  //     if (!Enes100.isVisible()) {
+  //       brake();
+  //       if (!waitVis()) {
+  //         break;
+  //       }
+  //       // Re-align once we get vision back
+  //       turnTo(0.0f);
+  //     }
+
+  //     // Check ultrasonic straight ahead
+  //     float front = ultraM();
+  //     if (front < ULTRA_OBST_STOP_M) {
+  //       // ---- SIDESTEP SEQUENCE WITH Y-LIMITS ----
+
+  //       float y = Enes100.getY();
+
+  //       // Proposed step positions
+  //       float upY   = y + LANE_SHIFT_M;   // toward top (dir = +1)
+  //       float downY = y - LANE_SHIFT_M;   // toward bottom (dir = -1)
+
+  //       float dir;
+
+  //       // 1) If stepping up would exceed max Y, force step down
+  //       if (upY > SWIPE_MAX_Y && downY >= SWIPE_MIN_Y) {
+  //         dir = -1.0f;
+  //       }
+  //       // 2) If stepping down would go below min Y, force step up
+  //       else if (downY < SWIPE_MIN_Y && upY <= SWIPE_MAX_Y) {
+  //         dir = +1.0f;
+  //       }
+  //       // 3) If both directions are legal, use lane-based choice
+  //       else {
+  //         // If below limbo lane, move up; if above, move down
+  //         dir = (y < laneY ? +1.0f : -1.0f);
+  //       }
+
+  //       // 1) Turn 90° sideways (left or right in world Y)
+  //       float sideHeading = (dir > 0.0f) ? (PI_F * 0.5f) : -(PI_F * 0.5f);
+  //       turnTo(sideHeading);
+
+  //       // 2) Drive sideways until we've moved ~LANE_SHIFT_M in Y
+  //       float yStart     = Enes100.getY();
+  //       unsigned long ts = millis();
+  //       while (fabs(Enes100.getY() - yStart) < (LANE_SHIFT_M * 0.9f) &&
+  //              millis() - ts < 4000UL &&
+  //              Enes100.isVisible()) {
+  //         setM(BASE_PWM, BASE_PWM);
+  //         delay(20);
+  //       }
+  //       brake();
+
+  //       // 3) Re-orient toward heading 0 (straight +X)
+  //       turnTo(0.0f);
+
+  //       // Back to top of loop and re-check ultrasonic / progress
+  //       continue;
+  //     }
+
+  //     // ---- CLEAR AHEAD: MOVE FORWARD WITH HEADING ~0 RAD ----
+  //     float x         = Enes100.getX();
+  //     float remaining = goalX - x;
+  //     if (remaining <= 0.05f) {
+  //       break;
+  //     }
+
+  //     float th = Enes100.getTheta();
+  //     float e  = nA(0.0f - th);      // error from perfect +X heading
+
+  //     float steerF = K_STRAIGHT * e;
+  //     if (steerF >  60.0f) steerF =  60.0f;
+  //     if (steerF < -60.0f) steerF = -60.0f;
+  //     int steer = (int)steerF;
+
+  //     setM(BASE_PWM - steer, BASE_PWM + steer);
+
+  //     delay(30); //TODO: ULTRASONIC DELAY
+  //   }
+
+  //   brake();
+  // } else {
+  //   // STATE_NAV_OBSTACLES skipped no vision
+  // }
+
+
+
+/*********** STATE_NAV_OBSTACLES with BACKUP ***********/
+//dbgln("STATE_NAV_OBSTACLES");
+if (waitVis()) {
+  const float goalX       = OBST_COL_X2 + 0.30f;
+  const float laneY       = LIMBO_Y;
+  const float SWIPE_MIN_Y = 0.25f;
+  const float SWIPE_MAX_Y = 1.75f;
+
+  // Quick self-test: if US returns "very far" repeatedly, assume dead.
+  int usDead = 0;
+  for (int i = 0; i < 6; i++) { if (ultraM() >= 4.5f) usDead++; delay(50); }
+  if (true) { //usDead >= 5
+  //  dbgln("Ultrasonic appears offline -> BACKUP EDGE BYPASS");
+    backupEdgeBypass();
+  } else {
+    //dbgln("Obstacles init align forward");
     turnTo(0.0f);
 
     unsigned long t0 = millis();
-    while (Enes100.getX() < goalX && millis() - t0 < 25000UL) {
+    int stale = 0;       // consecutive "far" readings (sensor failing)
+    bool fallBack = false;
 
-      // If vision drops, stop and wait for it to return
+    while (Enes100.getX() < goalX && millis() - t0 < 25000UL) {
       if (!Enes100.isVisible()) {
         brake();
-        if (!waitVis()) {
-          break;
-        }
-        // Re-align once we get vision back
+        if (!waitVis()) { break; }
         turnTo(0.0f);
       }
 
-      // Check ultrasonic straight ahead
       float front = ultraM();
+      if (true) {               // looks like sensor not reading
+        if (++stale > 10) { fallBack = true; break; }
+      } else stale = 0;
+
       if (front < ULTRA_OBST_STOP_M) {
-        // ---- SIDESTEP SEQUENCE WITH Y-LIMITS ----
-
+        // ---- sidestep with y-limits ----
         float y = Enes100.getY();
-
-        // Proposed step positions
-        float upY   = y + LANE_SHIFT_M;   // toward top (dir = +1)
-        float downY = y - LANE_SHIFT_M;   // toward bottom (dir = -1)
-
+        float upY   = y + LANE_SHIFT_M;
+        float downY = y - LANE_SHIFT_M;
         float dir;
 
-        // 1) If stepping up would exceed max Y, force step down
-        if (upY > SWIPE_MAX_Y && downY >= SWIPE_MIN_Y) {
-          dir = -1.0f;
-        }
-        // 2) If stepping down would go below min Y, force step up
-        else if (downY < SWIPE_MIN_Y && upY <= SWIPE_MAX_Y) {
-          dir = +1.0f;
-        }
-        // 3) If both directions are legal, use lane-based choice
-        else {
-          // If below limbo lane, move up; if above, move down
-          dir = (y < laneY ? +1.0f : -1.0f);
-        }
+        if (upY > SWIPE_MAX_Y && downY >= SWIPE_MIN_Y)      dir = -1.0f;
+        else if (downY < SWIPE_MIN_Y && upY <= SWIPE_MAX_Y) dir = +1.0f;
+        else                                                dir = (y < laneY ? +1.0f : -1.0f);
 
-        // 1) Turn 90° sideways (left or right in world Y)
         float sideHeading = (dir > 0.0f) ? (PI_F * 0.5f) : -(PI_F * 0.5f);
         turnTo(sideHeading);
 
-        // 2) Drive sideways until we've moved ~LANE_SHIFT_M in Y
-        float yStart     = Enes100.getY();
+        float yStart = Enes100.getY();
         unsigned long ts = millis();
         while (fabs(Enes100.getY() - yStart) < (LANE_SHIFT_M * 0.9f) &&
                millis() - ts < 4000UL &&
@@ -588,126 +687,34 @@ void loop(){
           delay(20);
         }
         brake();
-
-        // 3) Re-orient toward heading 0 (straight +X)
         turnTo(0.0f);
-
-        // Back to top of loop and re-check ultrasonic / progress
         continue;
       }
 
-      // ---- CLEAR AHEAD: MOVE FORWARD WITH HEADING ~0 RAD ----
-      float x         = Enes100.getX();
+      // forward with heading 0
+      float x = Enes100.getX();
       float remaining = goalX - x;
-      if (remaining <= 0.05f) {
-        break;
-      }
+      if (remaining <= 0.05f) break;
 
       float th = Enes100.getTheta();
-      float e  = nA(0.0f - th);      // error from perfect +X heading
-
+      float e  = nA(0.0f - th);
       float steerF = K_STRAIGHT * e;
       if (steerF >  60.0f) steerF =  60.0f;
       if (steerF < -60.0f) steerF = -60.0f;
       int steer = (int)steerF;
-
       setM(BASE_PWM - steer, BASE_PWM + steer);
-
-      delay(30); //TODO: ULTRASONIC DELAY
+      delay(30);
     }
-
     brake();
-  } else {
-    // STATE_NAV_OBSTACLES skipped no vision
+    if (fallBack) {
+   //   dbgln("Switching to BACKUP EDGE BYPASS mid-run");
+      backupEdgeBypass();
+    }
   }
-
-
-
-// /*********** STATE_NAV_OBSTACLES with BACKUP ***********/
-// dbgln("STATE_NAV_OBSTACLES");
-// if (waitVis()) {
-//   const float goalX       = OBST_COL_X2 + 0.30f;
-//   const float laneY       = LIMBO_Y;
-//   const float SWIPE_MIN_Y = 0.25f;
-//   const float SWIPE_MAX_Y = 1.75f;
-
-//   // Quick self-test: if US returns "very far" repeatedly, assume dead.
-//   int usDead = 0;
-//   for (int i = 0; i < 6; i++) { if (ultraM() >= 4.5f) usDead++; delay(50); }
-//   if (true) { //usDead >= 5
-//     dbgln("Ultrasonic appears offline -> BACKUP EDGE BYPASS");
-//     backupEdgeBypass();
-//   } else {
-//     dbgln("Obstacles init align forward");
-//     turnTo(0.0f);
-
-//     unsigned long t0 = millis();
-//     int stale = 0;       // consecutive "far" readings (sensor failing)
-//     bool fallBack = false;
-
-//     while (Enes100.getX() < goalX && millis() - t0 < 25000UL) {
-//       if (!Enes100.isVisible()) {
-//         brake();
-//         if (!waitVis()) { break; }
-//         turnTo(0.0f);
-//       }
-
-//       float front = ultraM();
-//       if (front >= 4.5f) {               // looks like sensor not reading
-//         if (++stale > 10) { fallBack = true; break; }
-//       } else stale = 0;
-
-//       if (front < ULTRA_OBST_STOP_M) {
-//         // ---- sidestep with y-limits ----
-//         float y = Enes100.getY();
-//         float upY   = y + LANE_SHIFT_M;
-//         float downY = y - LANE_SHIFT_M;
-//         float dir;
-
-//         if (upY > SWIPE_MAX_Y && downY >= SWIPE_MIN_Y)      dir = -1.0f;
-//         else if (downY < SWIPE_MIN_Y && upY <= SWIPE_MAX_Y) dir = +1.0f;
-//         else                                                dir = (y < laneY ? +1.0f : -1.0f);
-
-//         float sideHeading = (dir > 0.0f) ? (PI_F * 0.5f) : -(PI_F * 0.5f);
-//         turnTo(sideHeading);
-
-//         float yStart = Enes100.getY();
-//         unsigned long ts = millis();
-//         while (fabs(Enes100.getY() - yStart) < (LANE_SHIFT_M * 0.9f) &&
-//                millis() - ts < 4000UL &&
-//                Enes100.isVisible()) {
-//           setM(BASE_PWM, BASE_PWM);
-//           delay(20);
-//         }
-//         brake();
-//         turnTo(0.0f);
-//         continue;
-//       }
-
-//       // forward with heading 0
-//       float x = Enes100.getX();
-//       float remaining = goalX - x;
-//       if (remaining <= 0.05f) break;
-
-//       float th = Enes100.getTheta();
-//       float e  = nA(0.0f - th);
-//       float steerF = K_STRAIGHT * e;
-//       if (steerF >  60.0f) steerF =  60.0f;
-//       if (steerF < -60.0f) steerF = -60.0f;
-//       int steer = (int)steerF;
-//       setM(BASE_PWM - steer, BASE_PWM + steer);
-//       delay(30);
-//     }
-//     brake();
-//     if (fallBack) {
-//       dbgln("Switching to BACKUP EDGE BYPASS mid-run");
-//       backupEdgeBypass();
-//     }
-//   }
-// } else {
-//   dbgln("STATE_NAV_OBSTACLES skipped no vision");
-// }
-// /*********** end state ***********/
+} else {
+ // dbgln("STATE_NAV_OBSTACLES skipped no vision");
+}
+/*********** end state ***********/
 
 
 
