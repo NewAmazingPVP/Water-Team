@@ -471,8 +471,8 @@ void setup(){
   pinMode(ENB, OUTPUT);
 
   // Servo
-  arm.attach(SERVO_PIN);
-  arm.write(SERVO_STOW_DEG);
+  //arm.attach(SERVO_PIN);
+  //arm.write(SERVO_STOW_DEG);
 
   // Color sensor
   tcsBegin();
@@ -485,7 +485,7 @@ void setup(){
 }
 
 void loop(){
-  //runPumpMs(10000);
+  runPumpMs(24000);
   
   if (ran) return;
 
