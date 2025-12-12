@@ -130,7 +130,7 @@ static int depthOneShotBucket(){
   analogRead(DEPTH_AIN);        // throwaway to settle ADC mux
   delayMicroseconds(200);
   int raw = analogRead(DEPTH_AIN);
-  int mm  = map(raw, 280, 390, 10, 50);  // <-- keep this in sync with your calibration
+  int mm  = map(raw, 300, 390, 10, 50);  // <-- keep this in sync with your calibration
   if (mm < 0) mm = 0;
   // snap to nearest allowed bucket (20/30/40)
   int cand[3] = {20,30,40};
@@ -658,8 +658,8 @@ void loop(){
 
   // send telemetry (conservative 30mm if unstable)
   //Enes100.println(depthMM);
-  if (depthMM > 0) sendTelemetry(polluted, 30);
-  else             sendTelemetry(polluted, 30);
+  if (depthMM > 0) sendTelemetry(polluted, 20);
+  else             sendTelemetry(polluted, 20);
 
 
   unsigned long tPush = millis();
