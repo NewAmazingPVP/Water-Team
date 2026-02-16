@@ -1,9 +1,7 @@
-
-#include <math.h>      // must be before Enes100
+#include <math.h>
 #include <Arduino.h>
 #include "Enes100.h"
 
-/********************  SIMPLE DEBUG HELPERS  ********************/
 const bool DEBUG = true;
 
 void dbg(const char* s) {
@@ -16,16 +14,14 @@ void dbgFloat(float v) {
   if (DEBUG) Enes100.print(v);
 }
 
-/********************  TEAM / WIFI (SET THESE FOR YOUR ROBOT)  ********************/
-#define TEAM_NAME   "C'Ryan Me A River"   // <-- change if needed
-#define MISSION     WATER               // or DATA, etc.
-#define MARKER_ID   123                   // <-- set to your real ArUco ID
-#define ROOM_NUMBER 1116                // <-- your room number
+#define TEAM_NAME   "C'Ryan Me A River"
+#define MISSION     WATER
+#define MARKER_ID   123
+#define ROOM_NUMBER 1116
 
 #define WIFI_TX_PIN 8
 #define WIFI_RX_PIN 5
 
-/********************  MOTOR PINS (FROM WORKING REAL CODE)  ********************/
 #define ENA 10
 #define IN1 2
 #define IN2 7
@@ -33,57 +29,44 @@ void dbgFloat(float v) {
 #define IN3 12
 #define IN4 13
 
-/********************  CONSTANTS (MATCH PHYSICAL NAV)  ********************/
-// Frame / arena
 const float ARENA_X  = 4.0;
 const float ARENA_Y  = 2.0;
 
-// Mission A/B
 const float A_X = 0.33;
 const float A_Y = 1.50;
 const float B_X = 0.33;
 const float B_Y = 0.50;
 
-// Obstacles (column region)
 const float OBST_COL_X1 = 1.50;
 const float OBST_COL_X2 = 2.30;
 
-// Limbo
 const int   LIMBO_SIDE_IS_TOP   = 1;
 const float LIMBO_X             = 3.70;
 const float LIMBO_Y             = (LIMBO_SIDE_IS_TOP ? 1.70 : 0.50);
 const float LIMBO_APPR_DIST_M   = 0.40;
 const float LIMBO_PASS_DELTA_X  = 0.10;
 
-// Vision / motion
 const int   BASE_PWM            = 95;
 const float K_TURN              = 120.0f;
 const float K_STRAIGHT          = 90.0f;
 const int   MAX_PWM             = 180;
 const unsigned long VISION_WAIT_MS = 6000;
 
-// Obstacle / lane shifting
 const float ULTRA_OBST_STOP_M   = 0.28f;
 const float LANE_SHIFT_M        = 0.50f;
 const float EDGE_GUARD_Y_M      = 0.12f;
 
-// Heading control thresholds
 const float PI_F                = 3.14159265f;
-const float HEADING_SPIN_THRESH = 0.6f;   // rad ~34 deg
-const float DIST_SLOW_RADIUS    = 0.4f;   // start slowing inside 40 cm
+const float HEADING_SPIN_THRESH = 0.6f;
+const float DIST_SLOW_RADIUS    = 0.4f;
 
-/********************  GLOBALS  ********************/
-bool ran = false;    // single-run in real robot too
+bool ran = false;
 
-/********************  UTILS  ********************/
 static float nA(float a){
   while (a >  PI_F) a -= 2.0f * PI_F;
   while (a < -PI_F) a += 2.0f * PI_F;
   return a;
 }
-
-/********************  LOW-LEVEL MOTOR CONTROL (REAL ROBOT)  ********************/
-// From your working code, just wrapped so the rest of the nav code stays identical.
 
 static void mL(int p) {
   int s = abs(p);
@@ -109,7 +92,6 @@ static void mR(int p) {
   }
 }
 
-// This replaces the old Tank.setLeftMotorPWM / setRightMotorPWM
 static void setM(int L, int R){
   if (L > 255)  L = 255;
   if (L < -255) L = -255;
@@ -119,27 +101,19 @@ static void setM(int L, int R){
   mR(R);
 }
 
-// This replaces Tank.turnOffMotors()
 static void brake(){
   analogWrite(ENA, 0);
   analogWrite(ENB, 0);
 }
 
-/********************  (OPTIONAL) ULTRASONIC STUB  ********************/
-// In your sim code this used Tank.readDistanceSensor(1), and the only usage
-// is inside the commented-out obstacle state. To keep the code compiling on
-// real hardware, we just stub it to "very far".
-//
-// If you later wire a real ultrasonic, you can implement it here.
 static float ultraM(){
-  float d = 5.0f;   // 5m = "no obstacle"
+  float d = 5.0f;
   dbg("ultraM (stub) = ");
   dbgFloat(d);
   dbgln("");
   return d;
 }
 
-/********************  VISION HELPERS  ********************/
 static bool waitVis(unsigned long t = VISION_WAIT_MS){
   dbg("waitVis: up to ms=");
   dbgFloat((float)t);
@@ -158,7 +132,6 @@ static bool waitVis(unsigned long t = VISION_WAIT_MS){
   return false;
 }
 
-/********************  TURNING  ********************/
 static void turnTo(float tgt, unsigned long t = 3500){
   dbg("turnTo: tgt=");
   dbgFloat(tgt);
@@ -174,7 +147,7 @@ static void turnTo(float tgt, unsigned long t = 3500){
     dbgFloat(e);
     dbgln("");
 
-    if (fabs(e) < 0.03f){  // ~2 deg
+    if (fabs(e) < 0.03f){
       dbgln(" turnTo: within tolerance");
       break;
     }
@@ -184,7 +157,7 @@ static void turnTo(float tgt, unsigned long t = 3500){
     if (pwm >  MAX_PWM) pwm =  MAX_PWM;
     if (pwm < -MAX_PWM) pwm = -MAX_PWM;
 
-    setM(-pwm, pwm);       // spin in place
+    setM(-pwm, pwm);
     delay(10);
   }
   brake();
@@ -201,9 +174,6 @@ static void turnBy(float d){
   turnTo(tgt);
 }
 
-/********************  DRIVE TOWARD POINT (VISION-BASED)  ********************/
-// This is the “don’t orbit around target” version.
-// NAV LOGIC IDENTICAL TO SIM VERSION.
 static bool driveToward(float tx, float ty, float stopDistM){
   dbg("driveToward: target=(");
   dbgFloat(tx);
@@ -251,19 +221,18 @@ static bool driveToward(float tx, float ty, float stopDistM){
     float e      = nA(th_des - th);
     float ae     = (float)fabs(e);
 
-    // --- Avoid circles: spin in place on large heading error ---
     if (ae > HEADING_SPIN_THRESH){
       float pwmF = K_TURN * e;
       int   pwm  = (int)pwmF;
       if (pwm >  MAX_PWM) pwm =  MAX_PWM;
       if (pwm < -MAX_PWM) pwm = -MAX_PWM;
-      setM(-pwm, pwm);    // spin only
+      setM(-pwm, pwm);
     } else {
-      // Heading OK: drive forward with steering.
+
       float scale = 1.0f;
       if (dist < DIST_SLOW_RADIUS){
-        scale = dist / DIST_SLOW_RADIUS;  // 0..1
-        if (scale < 0.4f) scale = 0.4f;   // avoid stalling
+        scale = dist / DIST_SLOW_RADIUS;
+        if (scale < 0.4f) scale = 0.4f;
       }
       int base = (int)(BASE_PWM * scale);
 
@@ -301,7 +270,6 @@ static bool driveToward(float tx, float ty, float stopDistM){
   }
 }
 
-/********************  ORIENT TO POINT  ********************/
 static void orientTo(float tx, float ty){
   if (!waitVis()){
     dbgln("orientTo: NO VISION");
@@ -326,8 +294,7 @@ static void orientTo(float tx, float ty){
   turnTo(th_des);
 }
 
-/********************  LANE SLIDE (VISION + ULTRASONIC)  ********************/
-static void slideLane(float dir){ // dir: +1 toward y+ (top), -1 toward y- (bottom)
+static void slideLane(float dir){
   dbg("slideLane: dir=");
   dbgFloat(dir);
   dbgln("");
@@ -357,14 +324,13 @@ static void slideLane(float dir){ // dir: +1 toward y+ (top), -1 toward y- (bott
   driveToward(targetX, targetY, 0.02f);
 }
 
-/********************  SETUP / LOOP  ********************/
 void setup(){
-  // Motor pin modes (from your real code)
-  pinMode(IN1, OUTPUT); 
-  pinMode(IN2, OUTPUT); 
+
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
   pinMode(ENA, OUTPUT);
-  pinMode(IN3, OUTPUT); 
-  pinMode(IN4, OUTPUT); 
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
   pinMode(ENB, OUTPUT);
 
   Enes100.begin(TEAM_NAME, MISSION, MARKER_ID, ROOM_NUMBER,
@@ -376,7 +342,6 @@ void setup(){
 void loop(){
   if (ran) return;
 
-  // Decide mission site A/B using same heuristic as your real code
   float mx = A_X;
   float my = A_Y;
 
@@ -397,34 +362,28 @@ void loop(){
     dbgln("No start vision: default mission A");
   }
 
-  // --- STATE_ORIENT_TO_MISSION ---
   dbgln("STATE_ORIENT_TO_MISSION");
   orientTo(mx, my);
 
-  // --- STATE_DRIVE_TO_MISSION (pure vision) ---
   dbgln("STATE_DRIVE_TO_MISSION");
-  driveToward(mx, my, 0.12f);   // about 12 cm radius
+  driveToward(mx, my, 0.12f);
 
-  // --- STATE_MEASURE_WATER (SIM: SKIPPED) ---
   dbgln("STATE_MEASURE_WATER (sim/real: skipped placeholder)");
 
-  // --- STATE_NAV_OBSTACLES
   dbgln("STATE_NAV_OBSTACLES");
   if (waitVis()) {
-    // Target is a point just past the obstacle column, in the limbo lane
+
     const float goalX       = OBST_COL_X2 + 0.30f;
     const float laneY       = LIMBO_Y;
-    const float SWIPE_MIN_Y = 0.25f;   // hard lower bound
-    const float SWIPE_MAX_Y = 1.75f;   // hard upper bound
+    const float SWIPE_MIN_Y = 0.25f;
+    const float SWIPE_MAX_Y = 1.75f;
 
-    // Face roughly toward that goal first (heading ~0 rad, +X)
     dbgln("Obstacles init align forward");
     turnTo(0.0f);
 
     unsigned long t0 = millis();
     while (Enes100.getX() < goalX && millis() - t0 < 25000UL) {
 
-      // If vision drops, stop and wait for it to return
       if (!Enes100.isVisible()) {
         brake();
         dbgln("Obstacles lost vision wait");
@@ -432,48 +391,43 @@ void loop(){
           dbgln("Obstacles vision not recovered abort obstacle nav");
           break;
         }
-        // Re-align once we get vision back
+
         dbgln("Obstacles re align forward after vision return");
         turnTo(0.0f);
       }
 
-      // Check ultrasonic straight ahead
       float front = ultraM();
       if (front < ULTRA_OBST_STOP_M) {
-        // ---- SIDESTEP SEQUENCE WITH Y-LIMITS ----
+
         dbgln("Obstacles front blocked sidestep");
 
         float y = Enes100.getY();
 
-        // Proposed step positions
-        float upY   = y + LANE_SHIFT_M;   // toward top (dir = +1)
-        float downY = y - LANE_SHIFT_M;   // toward bottom (dir = -1)
+        float upY   = y + LANE_SHIFT_M;
+        float downY = y - LANE_SHIFT_M;
 
         float dir;
 
-        // 1) If stepping up would exceed max Y, force step down
         if (upY > SWIPE_MAX_Y && downY >= SWIPE_MIN_Y) {
           dir = -1.0f;
           dbgln("Sidestep choose DOWN due to upper limit");
         }
-        // 2) If stepping down would go below min Y, force step up
+
         else if (downY < SWIPE_MIN_Y && upY <= SWIPE_MAX_Y) {
           dir = +1.0f;
           dbgln("Sidestep choose UP due to lower limit");
         }
-        // 3) If both directions are legal, use lane-based choice
+
         else {
-          // If below limbo lane, move up; if above, move down
+
           dir = (y < laneY ? +1.0f : -1.0f);
           dbgln("Sidestep choose based on laneY");
         }
 
-        // 1) Turn 90° sideways (left or right in world Y)
         float sideHeading = (dir > 0.0f) ? (PI_F * 0.5f) : -(PI_F * 0.5f);
         dbgln("Sidestep turn 90");
         turnTo(sideHeading);
 
-        // 2) Drive sideways until we've moved ~LANE_SHIFT_M in Y
         float yStart     = Enes100.getY();
         unsigned long ts = millis();
         dbgln("Sidestep move sideways");
@@ -485,15 +439,12 @@ void loop(){
         }
         brake();
 
-        // 3) Re-orient toward heading 0 (straight +X)
         dbgln("Sidestep re align forward");
         turnTo(0.0f);
 
-        // Back to top of loop and re-check ultrasonic / progress
         continue;
       }
 
-      // ---- CLEAR AHEAD: MOVE FORWARD WITH HEADING ~0 RAD ----
       float x       = Enes100.getX();
       float remaining = goalX - x;
       if (remaining <= 0.05f) {
@@ -502,7 +453,7 @@ void loop(){
       }
 
       float th = Enes100.getTheta();
-      float e  = nA(0.0f - th);      // error from perfect +X heading
+      float e  = nA(0.0f - th);
 
       float steerF = K_STRAIGHT * e;
       if (steerF >  60.0f) steerF =  60.0f;
@@ -527,36 +478,10 @@ void loop(){
     dbgln("STATE_NAV_OBSTACLES skipped no vision");
   }
 
-
-  // --- STATE_APPROACH_LIMBO ---
   dbgln("STATE_APPROACH_LIMBO");
   orientTo(LIMBO_X, LIMBO_Y);
   driveToward(LIMBO_X, LIMBO_Y, LIMBO_APPR_DIST_M);
   brake();
-
-  // // --- STATE_PASS_LIMBO ---
-  // dbgln("STATE_PASS_LIMBO");
-  // if (waitVis()){
-  //   float x  = Enes100.getX();
-  //   float y  = Enes100.getY();
-  //   float th_des = (float)atan2(LIMBO_Y - y, LIMBO_X - x);
-  //   dbg("Limbo align: x=");
-  //   dbgFloat(x);
-  //   dbg(" y=");
-  //   dbgFloat(y);
-  //   dbg(" th_des=");
-  //   dbgFloat(th_des);
-  //   dbgln("");
-  //   turnTo(th_des);
-  // } else {
-  //   dbgln("Limbo: no vision for final align");
-  // }
-
-  // float targetX = LIMBO_X + LIMBO_PASS_DELTA_X;
-  // float targetY = LIMBO_Y;
-  // dbgln("STATE_PASS_LIMBO: drive past limbo");
-  // driveToward(targetX, targetY, 0.10f);
-  // brake();
 
   dbgln("STATE_PASS_LIMBO: extra 2s timed push");
   unsigned long tPush = millis();

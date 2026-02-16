@@ -21,9 +21,7 @@
 #define K_STRAIGHT      90.0f
 
 #define DISTANCE_MODE_TIME
-// #define DISTANCE_MODE_VISION
 
-//#define TURN_MODE_VISION
 #define TURN_MODE_TIME
 
 static const float METERS_PER_SEC = 0.37f;
@@ -126,7 +124,7 @@ static void goForward4m_vision() {
     int c = (int)constrain(K_STRAIGHT * e, -90, 90);
     setM(BASE_PWM - c, BASE_PWM + c);
     delay(10);
-    if (!Enes100.isVisible()) { //vision  loss tolerance
+    if (!Enes100.isVisible()) {
       uint32_t lost = millis();
       while (!Enes100.isVisible() && millis() - lost < 800) {
         setM(BASE_PWM, BASE_PWM);
@@ -160,7 +158,6 @@ void setup() {
 }
 void loop() {
   if (ran) return;
-
 
     goForward4m_time();
     turn90_time();
