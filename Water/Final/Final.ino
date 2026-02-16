@@ -658,8 +658,8 @@ void loop(){
 
   // send telemetry (conservative 30mm if unstable)
   //Enes100.println(depthMM);
-  if (depthMM > 0) sendTelemetry(polluted, 20);
-  else             sendTelemetry(polluted, 20);
+  if (depthMM > 0) sendTelemetry(polluted, depthMM);
+  else             sendTelemetry(polluted, depthMM);
 
 
   unsigned long tPush = millis();
